@@ -1,8 +1,10 @@
-# WebSocket + REST 混合数据架构
+# calculate-fake-te
 
 ## 概述
 
 本模块提供 Hyperliquid 交易所数据获取的完整解决方案，采用 WebSocket + REST API 混合架构，彻底解决 API 限流问题。
+
+**要求**: Python >= 3.12
 
 ## 核心特性
 
@@ -22,6 +24,13 @@
 ├── manager.py           # 数据管理器（核心）
 ├── analyzer.py          # 相关系数分析器
 ├── main.py              # 主程序入口
+├── utils/               # 工具模块
+│   ├── __init__.py
+│   ├── config.py        # 配置管理（环境变量）
+│   ├── scheduler.py     # 定时调度器
+│   ├── lark_bot.py      # 飞书通知工具
+│   ├── redisdb.py       # Redis数据库连接
+│   └── spider_failed_alert.py  # 爬虫失败告警
 └── README.md            # 本文档
 ```
 
@@ -45,9 +54,6 @@ uv sync
 # 持续监控模式（每小时分析一次）
 .venv/bin/python -m data.main --mode=monitor --interval=3600
 
-# 禁用 WebSocket（仅用 REST API）
-.venv/bin/python -m data.main --no-websocket
-
 # 调试模式（详细日志）
 .venv/bin/python -m data.main --debug
 ```
@@ -62,8 +68,6 @@ uv sync
 | `--db` | SQLite 数据库路径 | `hyperliquid_data.db` |
 | `--timeframes` | K 线周期，逗号分隔 | `1m,5m` |
 | `--periods` | 数据周期，逗号分隔 | `1d,7d,30d,60d` |
-| `--no-websocket` | 禁用 WebSocket | - |
-| `--testnet` | 使用测试网 | - |
 | `--debug` | 启用调试日志 | - |
 | `--interval` | 监控模式分析间隔（秒） | `3600` |
 
@@ -153,6 +157,73 @@ analyzer.run()  # 分析所有币种
 analyzer.run_single("ETH/USDC:USDC")
 ```
 
+### Utils 工具模块
+
+#### Config (`utils/config.py`)
+
+环境变量配置管理：
+- `ENV` - 环境标识（local/production等），默认 `local`
+- `LARKBOT_ID` - 飞书机器人 ID
+- `REDIS_HOST` - Redis 主机地址，默认 `127.0.0.1`
+- `REDIS_PASSWORD` - Redis 密码
+
+#### Scheduler (`utils/scheduler.py`)
+
+定时调度装饰器，支持三种调度方式：
+
+```python
+from data.utils.scheduler import scheduled_task
+
+# 方式1: 每天指定时间执行
+@scheduled_task(start_time='09:00')
+def daily_task():
+    pass
+
+# 方式2: 指定周几的指定时间执行
+@scheduled_task(start_time='09:00', weekdays=[0, 2, 4])  # 周一、周三、周五
+def weekday_task():
+    pass
+
+# 方式3: 每隔N秒执行一次
+@scheduled_task(duration=3600)  # 每小时执行一次
+def periodic_task():
+    pass
+```
+
+**注意**: 在 `local` 环境下，调度器会直接执行任务而不等待调度时间。
+
+#### LarkBot (`utils/lark_bot.py`)
+
+飞书消息发送工具，支持普通消息和彩色卡片：
+
+```python
+from data.utils.lark_bot import sender, sender_colourful
+
+# 发送普通消息（使用环境变量中的 LARKBOT_ID）
+sender("这是一条测试消息", title="通知标题")
+
+# 发送彩色卡片消息
+sender_colourful(url, "# 标题\n内容", title="告警")
+```
+
+#### RedisDB (`utils/redisdb.py`)
+
+Redis 连接池管理（单例模式，线程安全）：
+
+```python
+from data.utils.redisdb import redis_cli, close_redis
+
+# 获取 Redis 客户端（自动创建连接池）
+redis_client = redis_cli()
+
+# 使用 Redis
+redis_client.set("key", "value")
+value = redis_client.get("key")
+
+# 程序退出时关闭连接（可选）
+close_redis()
+```
+
 ## 数据获取策略
 
 ```
@@ -196,13 +267,27 @@ analyzer.run_single("ETH/USDC:USDC")
 1. 将 `hyperliquid.py` 重命名为其他名称（如 `hyperliquid_analyzer.py`）
 2. 本模块已内置路径修复，会自动处理此问题
 
-### 飞书通知
+### 环境变量配置
 
-需要设置环境变量 `LARKBOT_ID`：
+需要设置以下环境变量：
 
 ```bash
+# 环境标识（可选，默认 local）
+export ENV=production
+
+# 飞书机器人 ID（用于通知功能）
 export LARKBOT_ID=your_bot_id
+
+# Redis 配置（可选）
+export REDIS_HOST=127.0.0.1
+export REDIS_PASSWORD=your_redis_password
 ```
+
+**说明**:
+- `ENV`: 设置为 `local` 时，定时调度器会直接执行任务而不等待调度时间
+- `LARKBOT_ID`: 飞书通知功能必需，用于发送分析结果和告警消息
+- `REDIS_HOST`: Redis 主机地址，默认 `127.0.0.1`
+- `REDIS_PASSWORD`: Redis 密码，如果 Redis 未设置密码可省略
 
 ## 依赖
 
@@ -211,6 +296,11 @@ export LARKBOT_ID=your_bot_id
 - `pandas>=2.3.3` - 数据处理
 - `numpy>=2.3.4` - 数值计算
 - `retry>=0.9.2` - 重试机制
+- `matplotlib>=3.10.7` - 数据可视化
+- `pyinform>=0.2.0` - 信息论分析
+- `redis>=7.1.0` - Redis 支持
+- `requests>=2.32.0` - HTTP 请求
+- `seaborn>=0.13.2` - 统计可视化
 
 ## 许可证
 

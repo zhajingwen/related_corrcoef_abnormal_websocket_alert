@@ -14,11 +14,12 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+<<<<<<< Current (Your changes)
 # 尝试导入官方 SDK
 # 注意：如果当前目录有 hyperliquid.py 文件，会遮蔽安装的 hyperliquid 包
 # 我们使用 importlib 来确保导入正确的包
 HAS_HYPERLIQUID_SDK = False
-Info = None
+Info= None
 constants = None
 
 def _try_import_hyperliquid():
@@ -69,6 +70,10 @@ if not _try_import_hyperliquid():
         "hyperliquid SDK 未安装或导入失败，WebSocket 功能不可用。"
         "请运行: pip install hyperliquid-python-sdk"
     )
+=======
+from hyperliquid.info import Info
+from hyperliquid.utils import constants
+>>>>>>> Incoming (Background Agent changes)
 
 
 class WebSocketClient:
@@ -93,9 +98,6 @@ class WebSocketClient:
             max_cache_size: 每个交易对/周期的最大缓存 K 线数量
             testnet: 是否使用测试网
         """
-        if not HAS_HYPERLIQUID_SDK:
-            raise ImportError("hyperliquid SDK 未安装，请运行: pip install hyperliquid")
-        
         self.max_cache_size = max_cache_size
         self.testnet = testnet
         self.base_url = constants.TESTNET_API_URL if testnet else constants.MAINNET_API_URL

@@ -12,7 +12,7 @@ import pandas as pd
 
 from .sqlite_cache import SQLiteCache
 from .rest_client import RESTClient
-from .websocket_client import WebSocketClient, HAS_HYPERLIQUID_SDK
+from .websocket_client import WebSocketClient
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class DataManager:
             testnet: 是否使用测试网
         """
         self.exchange_name = exchange_name
-        self.use_websocket = use_websocket and HAS_HYPERLIQUID_SDK
+        self.use_websocket = use_websocket
         
         # 初始化 SQLite 缓存
         self.cache = SQLiteCache(db_path)

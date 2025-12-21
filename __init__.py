@@ -9,7 +9,7 @@ Data 模块
 - 相关系数分析器
 
 使用示例:
-    from data import DataManager, DelayCorrelationAnalyzer
+    import DataManager, DelayCorrelationAnalyzer
     
     # 使用数据管理器获取数据
     manager = DataManager()
@@ -20,34 +20,11 @@ Data 模块
     # 运行分析器
     analyzer = DelayCorrelationAnalyzer()
     analyzer.run()
-
-注意：如果当前目录存在 hyperliquid.py 文件，会遮蔽 hyperliquid SDK。
-解决方案：
-1. 将 hyperliquid.py 重命名为其他名称（如 hyperliquid_analyzer.py）
-2. 或使用 --no-websocket 参数禁用 WebSocket 功能
 """
 
 import sys
 import os
 
-# 修复 hyperliquid.py 遮蔽 SDK 的问题
-# 确保 site-packages 的优先级高于当前工作目录
-def _fix_import_path():
-    """将 site-packages 路径提升到最前面，避免本地文件遮蔽安装的包"""
-    cwd = os.getcwd()
-    site_packages = []
-    other_paths = []
-    
-    for path in sys.path:
-        if 'site-packages' in path:
-            site_packages.append(path)
-        elif path != cwd and path != '':
-            other_paths.append(path)
-    
-    # 重新排序：site-packages 优先
-    sys.path = site_packages + other_paths + [cwd, '']
-
-_fix_import_path()
 
 from .sqlite_cache import SQLiteCache
 from .rest_client import RESTClient

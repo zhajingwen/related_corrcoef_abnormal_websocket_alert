@@ -16,7 +16,6 @@ import logging
 import sys
 import time
 import signal
-from typing import Optional
 
 from .analyzer import DelayCorrelationAnalyzer, setup_logging
 
@@ -31,7 +30,6 @@ def parse_args() -> argparse.Namespace:
         epilog="""
 示例:
   python -m data.main --mode=analysis              # 一次性分析所有币种
-  python -m data.main --mode=analysis --no-cache   # 不使用缓存
   python -m data.main --coin=ETH/USDC:USDC         # 分析单个币种
   python -m data.main --mode=monitor               # 持续监控模式
         """
@@ -80,18 +78,6 @@ def parse_args() -> argparse.Namespace:
     )
     
     parser.add_argument(
-        "--no-websocket",
-        action="store_true",
-        help="禁用 WebSocket"
-    )
-    
-    parser.add_argument(
-        "--testnet",
-        action="store_true",
-        help="使用测试网"
-    )
-    
-    parser.add_argument(
         "--debug",
         action="store_true",
         help="启用调试日志"
@@ -107,19 +93,22 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def run_analysis(args: argparse.Namespace):
-    """运行一次性分析"""
+def create_analyzer(args: argparse.Namespace) -> DelayCorrelationAnalyzer:
+    """根据命令行参数创建分析器实例"""
     timeframes = [tf.strip() for tf in args.timeframes.split(",")]
     periods = [p.strip() for p in args.periods.split(",")]
     
-    analyzer = DelayCorrelationAnalyzer(
+    return DelayCorrelationAnalyzer(
         exchange_name=args.exchange,
         db_path=args.db,
-        use_websocket=not args.no_websocket,
-        testnet=args.testnet,
         default_timeframes=timeframes,
         default_periods=periods
     )
+
+
+def run_analysis(args: argparse.Namespace):
+    """运行一次性分析"""
+    analyzer = create_analyzer(args)
     
     if args.coin:
         # 分析单个币种
@@ -132,17 +121,7 @@ def run_analysis(args: argparse.Namespace):
 
 def run_monitor(args: argparse.Namespace):
     """运行持续监控模式"""
-    timeframes = [tf.strip() for tf in args.timeframes.split(",")]
-    periods = [p.strip() for p in args.periods.split(",")]
-    
-    analyzer = DelayCorrelationAnalyzer(
-        exchange_name=args.exchange,
-        db_path=args.db,
-        use_websocket=not args.no_websocket,
-        testnet=args.testnet,
-        default_timeframes=timeframes,
-        default_periods=periods
-    )
+    analyzer = create_analyzer(args)
     
     # 设置信号处理
     running = True
@@ -197,8 +176,6 @@ def main():
     logger.info(f"模式: {args.mode}")
     logger.info(f"交易所: {args.exchange}")
     logger.info(f"数据库: {args.db}")
-    logger.info(f"WebSocket: {'禁用' if args.no_websocket else '启用'}")
-    logger.info(f"测试网: {'是' if args.testnet else '否'}")
     logger.info("=" * 60)
     
     try:

@@ -2,7 +2,7 @@
 相关系数分析器模块
 
 分析山寨币与 BTC 的皮尔逊相关系数，识别存在时间差套利空间的异常币种。
-基于 DataManager 获取数据，支持 WebSocket 实时数据和 REST 历史数据。
+基于 DataManager 获取数据，使用 REST API 和 SQLite 缓存。
 """
 
 import time
@@ -88,8 +88,6 @@ class DelayCorrelationAnalyzer:
         self,
         exchange_name: str = "hyperliquid",
         db_path: str = "hyperliquid_data.db",
-        use_websocket: bool = True,
-        testnet: bool = False,
         default_timeframes: Optional[list[str]] = None,
         default_periods: Optional[list[str]] = None
     ):
@@ -99,8 +97,6 @@ class DelayCorrelationAnalyzer:
         Args:
             exchange_name: 交易所名称
             db_path: SQLite 数据库路径
-            use_websocket: 是否启用 WebSocket
-            testnet: 是否使用测试网
             default_timeframes: K 线颗粒度列表
             default_periods: 数据周期列表
         """
@@ -112,9 +108,7 @@ class DelayCorrelationAnalyzer:
         # 初始化数据管理器
         self.data_manager = DataManager(
             exchange_name=exchange_name,
-            db_path=db_path,
-            use_websocket=use_websocket,
-            testnet=testnet
+            db_path=db_path
         )
         
         # 飞书通知配置

@@ -160,8 +160,11 @@ class DelayCorrelationAnalyzer:
         arr_len = len(btc_ret)
         
         for lag in lags:
-            # 检查 lag 是否超过数组长度
-            if lag > 0 and lag >= arr_len:
+            # 检查 lag 是否会导致数据不足
+            # 当 lag > 0 时，切片后的数据长度为 arr_len - lag
+            # 需要确保剩余数据点足够进行相关系数计算
+            remaining_points = arr_len - lag if lag > 0 else arr_len
+            if remaining_points < DelayCorrelationAnalyzer.MIN_POINTS_FOR_CORR_CALC:
                 corrs.append(np.nan)
                 continue
             
@@ -175,6 +178,7 @@ class DelayCorrelationAnalyzer:
             
             m = min(len(x), len(y))
             
+            # 二次检查：确保对齐后的数据点足够
             if m < DelayCorrelationAnalyzer.MIN_POINTS_FOR_CORR_CALC:
                 corrs.append(np.nan)
                 continue
@@ -237,8 +241,13 @@ class DelayCorrelationAnalyzer:
         """
         # 对齐时间索引
         common_idx = btc_df.index.intersection(alt_df.index)
-        btc_df_aligned = btc_df.loc[common_idx]
-        alt_df_aligned = alt_df.loc[common_idx]
+        btc_df_aligned = btc_df.loc[common_idx].copy()
+        alt_df_aligned = alt_df.loc[common_idx].copy()
+        
+        # 重新计算 return 列，因为对齐后原始的 pct_change() 值可能不正确
+        # （原始 return 是基于连续时间点计算的，对齐可能删除了中间时间点）
+        btc_df_aligned['return'] = btc_df_aligned['Close'].pct_change().fillna(0)
+        alt_df_aligned['return'] = alt_df_aligned['Close'].pct_change().fillna(0)
         
         # 数据验证：检查数据量
         if len(btc_df_aligned) < self.MIN_DATA_POINTS_FOR_ANALYSIS:

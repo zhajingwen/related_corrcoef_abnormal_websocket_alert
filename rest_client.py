@@ -305,8 +305,8 @@ class RESTClient:
                 break
             last_timestamp = new_timestamp
             
-            # 过滤超出范围的数据
-            filtered = [row for row in ohlcv if row[0] <= until_ms]
+            # 过滤超出范围的数据（包括起始和结束边界）
+            filtered = [row for row in ohlcv if since_ms <= row[0] <= until_ms]
             all_rows.extend(filtered)
             
             if len(ohlcv) < 1500 or new_timestamp >= until_ms:

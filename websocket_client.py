@@ -7,6 +7,8 @@ WebSocket 客户端模块
 
 import logging
 import asyncio
+import atexit
+import weakref
 from collections import deque
 from typing import Optional, Callable
 from datetime import datetime
@@ -16,6 +18,21 @@ logger = logging.getLogger(__name__)
 
 from hyperliquid.info import Info
 from hyperliquid.utils import constants
+
+# 全局注册表，用于跟踪所有 WebSocketClient 实例以便在程序退出时清理
+_ws_client_instances: weakref.WeakSet = weakref.WeakSet()
+
+
+def _cleanup_all_ws_clients():
+    """程序退出时清理所有 WebSocket 客户端连接"""
+    for client in _ws_client_instances:
+        try:
+            client.stop()
+        except Exception:
+            pass
+
+
+atexit.register(_cleanup_all_ws_clients)
 
 
 class WebSocketClient:
@@ -57,6 +74,9 @@ class WebSocketClient:
         # 回调函数
         self._callbacks: dict[tuple[str, str], list[Callable]] = {}
         
+        # 注册到全局跟踪器，确保程序退出时能够清理资源
+        _ws_client_instances.add(self)
+        
         logger.info(f"WebSocket 客户端初始化 | 测试网: {testnet} | 缓存大小: {max_cache_size}")
     
     def start(self):
@@ -82,23 +102,83 @@ class WebSocketClient:
             try:
                 # 尝试关闭 WebSocket 连接
                 # 根据 hyperliquid SDK 的实现方式尝试不同的关闭方法
-                if hasattr(self._info, 'close'):
-                    self._info.close()
-                elif hasattr(self._info, 'disconnect'):
-                    self._info.disconnect()
-                elif hasattr(self._info, 'ws') and self._info.ws:
-                    if hasattr(self._info.ws, 'close'):
-                        self._info.ws.close()
-                # 尝试关闭 websocket manager
-                if hasattr(self._info, 'ws_manager') and self._info.ws_manager:
-                    if hasattr(self._info.ws_manager, 'close'):
-                        self._info.ws_manager.close()
+                self._close_info_connection(self._info)
             except Exception as e:
                 logger.warning(f"关闭 WebSocket 连接时出错: {e}")
             finally:
                 self._info = None
         
+        # 清理数据缓存以释放内存
+        self.data_cache.clear()
+        
         logger.info("WebSocket 连接已停止")
+    
+    @staticmethod
+    def _close_info_connection(info: Info):
+        """
+        尝试关闭 Info 对象的 WebSocket 连接
+        
+        hyperliquid SDK 的 Info 对象可能有多种关闭方式，
+        此方法尝试所有可能的方式以确保连接被正确关闭。
+        """
+        # 方法1: 直接调用 close 方法
+        if hasattr(info, 'close'):
+            try:
+                info.close()
+                return
+            except Exception:
+                pass
+        
+        # 方法2: 调用 disconnect 方法
+        if hasattr(info, 'disconnect'):
+            try:
+                info.disconnect()
+                return
+            except Exception:
+                pass
+        
+        # 方法3: 关闭内部 ws 对象
+        if hasattr(info, 'ws') and info.ws:
+            try:
+                if hasattr(info.ws, 'close'):
+                    info.ws.close()
+            except Exception:
+                pass
+        
+        # 方法4: 关闭 websocket manager
+        if hasattr(info, 'ws_manager') and info.ws_manager:
+            try:
+                if hasattr(info.ws_manager, 'close'):
+                    info.ws_manager.close()
+                elif hasattr(info.ws_manager, 'stop'):
+                    info.ws_manager.stop()
+            except Exception:
+                pass
+        
+        # 方法5: 尝试关闭内部线程（如果存在）
+        if hasattr(info, '_thread') and info._thread:
+            try:
+                if hasattr(info._thread, 'join'):
+                    info._thread.join(timeout=1.0)  # 等待最多1秒
+            except Exception:
+                pass
+    
+    def __del__(self):
+        """析构函数：确保资源被释放"""
+        try:
+            self.stop()
+        except Exception:
+            pass
+    
+    def __enter__(self):
+        """支持 with 语句"""
+        self.start()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """退出 with 语句时停止连接"""
+        self.stop()
+        return False
     
     def subscribe_candles(
         self,

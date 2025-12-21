@@ -7,6 +7,7 @@
 
 import time
 import logging
+import warnings
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 import numpy as np
@@ -178,7 +179,11 @@ class DelayCorrelationAnalyzer:
                 corrs.append(np.nan)
                 continue
             
-            corr = np.corrcoef(x[:m], y[:m])[0, 1]
+            # 抑制常数数组导致的 RuntimeWarning（标准差为 0 时会产生 NaN）
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*invalid value.*')
+                warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*divide by zero.*')
+                corr = np.corrcoef(x[:m], y[:m])[0, 1]
             corrs.append(np.nan if np.isnan(corr) else corr)
         
         # 找出最大相关系数对应的延迟值

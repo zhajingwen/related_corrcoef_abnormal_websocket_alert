@@ -8,12 +8,29 @@ SQLite 缓存模块
 import sqlite3
 import logging
 import threading
+import atexit
+import weakref
 from pathlib import Path
 from contextlib import contextmanager
 from typing import Optional
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# 全局注册表，用于跟踪所有 SQLiteCache 实例以便在程序退出时关闭连接
+_cache_instances: weakref.WeakSet = weakref.WeakSet()
+
+
+def _cleanup_all_caches():
+    """程序退出时关闭所有缓存连接"""
+    for cache in _cache_instances:
+        try:
+            cache.close_all()
+        except Exception:
+            pass
+
+
+atexit.register(_cleanup_all_caches)
 
 
 class SQLiteCache:
@@ -28,6 +45,9 @@ class SQLiteCache:
         """
         self.db_path = Path(db_path)
         self._local = threading.local()  # 线程本地存储
+        self._connections: list = []  # 跟踪所有创建的连接
+        self._connections_lock = threading.Lock()  # 保护连接列表的锁
+        _cache_instances.add(self)  # 注册到全局跟踪器
         self._init_db()
     
     def _init_db(self):
@@ -70,24 +90,67 @@ class SQLiteCache:
         """
         # 检查当前线程是否已有连接
         if not hasattr(self._local, 'conn') or self._local.conn is None:
-            self._local.conn = sqlite3.connect(
+            conn = sqlite3.connect(
                 self.db_path,
                 check_same_thread=False,
                 timeout=30.0  # 增加超时时间，避免并发时锁等待超时
             )
+            self._local.conn = conn
+            # 跟踪连接以便后续关闭
+            with self._connections_lock:
+                self._connections.append(conn)
         
         try:
             yield self._local.conn
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             # 发生错误时回滚事务
-            self._local.conn.rollback()
+            if self._local.conn:
+                self._local.conn.rollback()
             raise
     
     def close(self):
         """关闭当前线程的数据库连接"""
         if hasattr(self._local, 'conn') and self._local.conn is not None:
-            self._local.conn.close()
+            conn = self._local.conn
             self._local.conn = None
+            try:
+                conn.close()
+            except Exception:
+                pass
+            # 从跟踪列表中移除
+            with self._connections_lock:
+                if conn in self._connections:
+                    self._connections.remove(conn)
+    
+    def close_all(self):
+        """关闭所有线程的数据库连接"""
+        with self._connections_lock:
+            for conn in self._connections:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._connections.clear()
+        # 清理当前线程的连接引用
+        if hasattr(self._local, 'conn'):
+            self._local.conn = None
+        logger.debug("所有数据库连接已关闭")
+    
+    def __del__(self):
+        """析构函数：确保所有连接被关闭"""
+        try:
+            self.close_all()
+        except Exception:
+            pass
+    
+    def __enter__(self):
+        """支持 with 语句"""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """退出 with 语句时关闭所有连接"""
+        self.close_all()
+        return False
     
     def save_ohlcv(self, symbol: str, timeframe: str, df: pd.DataFrame) -> int:
         """

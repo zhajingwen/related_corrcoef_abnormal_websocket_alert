@@ -130,11 +130,15 @@ class WebSocketClient:
         if cache_key not in self.data_cache:
             self.data_cache[cache_key] = deque(maxlen=self.max_cache_size)
         
-        # 注册回调
+        # 注册回调（去重检查）
         if callback:
             if cache_key not in self._callbacks:
                 self._callbacks[cache_key] = []
-            self._callbacks[cache_key].append(callback)
+            # 检查回调是否已存在，避免重复注册
+            if callback not in self._callbacks[cache_key]:
+                self._callbacks[cache_key].append(callback)
+            else:
+                logger.debug(f"回调已存在，跳过重复注册 | {coin} | {interval}")
         
         # 订阅
         try:

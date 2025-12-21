@@ -12,7 +12,7 @@ def scheduled_task(start_time=None, duration=None, weekdays=None):
     (以下三种调度方式任选其一，其他参数按需配置)
 
     :param start_time: 启动时间，格式为 'HH:MM'
-    :param duration: 多长时间调度一次（秒）
+    :param duration: 多长时间调度一次（秒），必须 > 0
     :param weekdays: 指定周几执行，格式为整数列表 [0,1,2,3,4,5,6]，0表示周一，6表示周日
                      如 [1,3,5] 表示周二、周四、周六执行
                      如果不指定，则每天都执行
@@ -21,7 +21,41 @@ def scheduled_task(start_time=None, duration=None, weekdays=None):
     1. 周几的几点执行：提供 start_time 和 weekdays 参数
     2. 每天的几点执行：只提供 start_time 参数 
     3. 每隔 N 秒执行一次：只提供 duration 参数
+    
+    Raises:
+        ValueError: 参数配置无效时抛出
     """
+    # 参数校验：必须提供 start_time 或 duration 之一
+    if start_time is None and duration is None:
+        raise ValueError("必须提供 start_time 或 duration 参数之一")
+    
+    # duration 模式时校验值有效性
+    if start_time is None and duration is not None:
+        if not isinstance(duration, (int, float)):
+            raise ValueError(f"duration 必须是数字，当前类型: {type(duration).__name__}")
+        if duration <= 0:
+            raise ValueError(f"duration 必须大于 0，当前值: {duration}")
+    
+    # start_time 格式校验
+    if start_time is not None:
+        try:
+            parts = start_time.split(':')
+            if len(parts) != 2:
+                raise ValueError()
+            hour, minute = int(parts[0]), int(parts[1])
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                raise ValueError()
+        except (ValueError, AttributeError):
+            raise ValueError(f"start_time 格式无效，应为 'HH:MM'，当前值: {start_time}")
+    
+    # weekdays 校验
+    if weekdays is not None:
+        if not isinstance(weekdays, (list, tuple)):
+            raise ValueError(f"weekdays 必须是列表或元组，当前类型: {type(weekdays).__name__}")
+        for day in weekdays:
+            if not isinstance(day, int) or day < 0 or day > 6:
+                raise ValueError(f"weekdays 中的值必须是 0-6 的整数，当前值: {day}")
+    
     def decorator(func):
         def wrapper(*args, **kwargs):
             if env == 'local':

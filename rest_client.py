@@ -212,6 +212,9 @@ class RESTClient:
         # 从缓存获取完整数据
         return self.cache.get_ohlcv(symbol, timeframe, since_ms=since_ms)
     
+    # 下载循环安全阀：最大请求次数
+    MAX_REQUESTS_PER_DOWNLOAD = 500
+    
     def _download_full(
         self,
         symbol: str,
@@ -223,8 +226,16 @@ class RESTClient:
         all_rows = []
         fetched = 0
         current_since = since_ms
+        request_count = 0
+        last_timestamp = None
         
         while True:
+            # 安全阀：限制最大请求次数
+            request_count += 1
+            if request_count > self.MAX_REQUESTS_PER_DOWNLOAD:
+                logger.warning(f"达到最大请求次数限制 ({self.MAX_REQUESTS_PER_DOWNLOAD}) | {symbol} | {timeframe}")
+                break
+            
             try:
                 ohlcv = self._fetch_ohlcv_raw(symbol, timeframe, current_since, limit=1500)
             except Exception as e:
@@ -234,9 +245,16 @@ class RESTClient:
             if not ohlcv:
                 break
             
+            # 安全阀：检测时间戳不前进（API 返回相同数据）
+            new_timestamp = ohlcv[-1][0]
+            if last_timestamp is not None and new_timestamp <= last_timestamp:
+                logger.warning(f"检测到时间戳未前进，终止下载 | {symbol} | {timeframe} | timestamp={new_timestamp}")
+                break
+            last_timestamp = new_timestamp
+            
             all_rows.extend(ohlcv)
             fetched += len(ohlcv)
-            current_since = ohlcv[-1][0] + 1
+            current_since = new_timestamp + 1
             
             if len(ohlcv) < 1500 or fetched >= target_bars:
                 break
@@ -259,8 +277,16 @@ class RESTClient:
         """下载指定时间范围的 OHLCV 数据"""
         all_rows = []
         current_since = since_ms
+        request_count = 0
+        last_timestamp = None
         
         while current_since < until_ms:
+            # 安全阀：限制最大请求次数
+            request_count += 1
+            if request_count > self.MAX_REQUESTS_PER_DOWNLOAD:
+                logger.warning(f"达到最大请求次数限制 ({self.MAX_REQUESTS_PER_DOWNLOAD}) | {symbol} | {timeframe}")
+                break
+            
             try:
                 ohlcv = self._fetch_ohlcv_raw(symbol, timeframe, current_since, limit=1500)
             except Exception as e:
@@ -270,14 +296,21 @@ class RESTClient:
             if not ohlcv:
                 break
             
+            # 安全阀：检测时间戳不前进
+            new_timestamp = ohlcv[-1][0]
+            if last_timestamp is not None and new_timestamp <= last_timestamp:
+                logger.warning(f"检测到时间戳未前进，终止下载 | {symbol} | {timeframe} | timestamp={new_timestamp}")
+                break
+            last_timestamp = new_timestamp
+            
             # 过滤超出范围的数据
             filtered = [row for row in ohlcv if row[0] <= until_ms]
             all_rows.extend(filtered)
             
-            if len(ohlcv) < 1500 or ohlcv[-1][0] >= until_ms:
+            if len(ohlcv) < 1500 or new_timestamp >= until_ms:
                 break
             
-            current_since = ohlcv[-1][0] + 1
+            current_since = new_timestamp + 1
             time.sleep(self.rate_limit_ms / 1000)
         
         if not all_rows:

@@ -83,6 +83,8 @@ class DataManager:
         """
         获取 BTC 数据（带 LRU 内存缓存，线程安全）
         
+        使用双重检查锁定模式，避免多线程环境下的重复下载。
+        
         Args:
             timeframe: K 线周期
             period: 数据周期
@@ -92,6 +94,7 @@ class DataManager:
         """
         cache_key = (timeframe, period)
         
+        # 第一次检查（快速路径）
         with self._btc_cache_lock:
             if cache_key in self._btc_cache:
                 # 移到末尾（标记为最近使用）
@@ -99,11 +102,19 @@ class DataManager:
                 logger.debug(f"BTC 数据缓存命中 | {timeframe}/{period}")
                 return self._btc_cache[cache_key].copy()
         
+        # 缓存未命中，需要下载数据
         btc_symbol = "BTC/USDC:USDC"
         try:
             df = self.get_ohlcv(btc_symbol, timeframe, period)
             if not df.empty:
                 with self._btc_cache_lock:
+                    # 双重检查：在锁内再次检查缓存，防止其他线程已经下载并缓存了数据
+                    if cache_key in self._btc_cache:
+                        # 其他线程已经下载了，直接返回缓存的数据
+                        self._btc_cache.move_to_end(cache_key)
+                        logger.debug(f"BTC 数据已被其他线程缓存 | {timeframe}/{period}")
+                        return self._btc_cache[cache_key].copy()
+                    
                     # 添加到缓存
                     self._btc_cache[cache_key] = df
                     

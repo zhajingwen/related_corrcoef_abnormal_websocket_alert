@@ -6,6 +6,27 @@ from .config import env
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('Timer Scheduler')
 
+
+def _calculate_days_until_next_weekday(current_weekday: int, target_weekdays: list) -> int:
+    """
+    计算到下一个符合条件的周几需要等待的天数
+    
+    Args:
+        current_weekday: 当前是周几 (0=周一, 6=周日)
+        target_weekdays: 目标周几列表，如 [1, 3, 5] 表示周二、周四、周六
+    
+    Returns:
+        需要等待的天数（至少1天）
+    """
+    # 计算到下一个目标周几需要等待的天数
+    for days_ahead in range(1, 8):  # 最多等待7天
+        next_weekday = (current_weekday + days_ahead) % 7
+        if next_weekday in target_weekdays:
+            return days_ahead
+    
+    # 理论上不会到达这里（因为一周有7天，至少会找到一个目标周几），但为了安全返回7天
+    return 7
+
 def scheduled_task(start_time=None, duration=None, weekdays=None):
     """
     定时调度装饰器
@@ -74,8 +95,11 @@ def scheduled_task(start_time=None, duration=None, weekdays=None):
                         # 获取当前是周几 (0表示周一，6表示周日)
                         current_weekday = today_now.weekday()  # 0-6 对应周一至周日
                         if current_weekday not in weekdays:
-                            # 不是指定的周几，等待一段时间再检查
-                            time.sleep(60)  # 等待 1 分钟再检查
+                            # 不是指定的周几，计算到下一个符合条件的周几需要等待的时间
+                            days_until_next = _calculate_days_until_next_weekday(current_weekday, weekdays)
+                            wait_seconds = days_until_next * 24 * 60 * 60
+                            logger.info(f'当前是周{current_weekday+1}，不在调度计划 {weekdays} 中，等待 {days_until_next} 天后再次检查')
+                            time.sleep(wait_seconds)
                             continue
                         else:
                             logger.info(f'今天是周{current_weekday+1}，符合调度计划 {weekdays}')    

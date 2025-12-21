@@ -299,6 +299,10 @@ class RESTClient:
                 break
             
             # 安全阀：检测时间戳不前进
+            # 在访问 ohlcv[-1] 之前检查列表长度，确保安全
+            if len(ohlcv) == 0:
+                break
+            
             new_timestamp = ohlcv[-1][0]
             if last_timestamp is not None and new_timestamp <= last_timestamp:
                 logger.warning(f"检测到时间戳未前进，终止下载 | {symbol} | {timeframe} | timestamp={new_timestamp}")

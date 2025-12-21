@@ -14,66 +14,8 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-<<<<<<< Current (Your changes)
-# 尝试导入官方 SDK
-# 注意：如果当前目录有 hyperliquid.py 文件，会遮蔽安装的 hyperliquid 包
-# 我们使用 importlib 来确保导入正确的包
-HAS_HYPERLIQUID_SDK = False
-Info= None
-constants = None
-
-def _try_import_hyperliquid():
-    """尝试导入 hyperliquid SDK，处理本地文件遮蔽的问题"""
-    global HAS_HYPERLIQUID_SDK, Info, constants
-    
-    try:
-        import importlib.util
-        import sys
-        
-        # 首先尝试直接导入
-        try:
-            from hyperliquid.info import Info as _Info
-            from hyperliquid.utils import constants as _constants
-            # 验证是否是正确的 SDK（检查是否有 WebsocketManager）
-            from hyperliquid.websocket_manager import WebsocketManager
-            Info = _Info
-            constants = _constants
-            HAS_HYPERLIQUID_SDK = True
-            return True
-        except (ImportError, AttributeError):
-            pass
-        
-        # 如果失败，尝试从 site-packages 直接导入
-        for path in sys.path:
-            if 'site-packages' in path:
-                spec = importlib.util.find_spec('hyperliquid', [path])
-                if spec and spec.origin and 'site-packages' in spec.origin:
-                    hyperliquid_pkg = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(hyperliquid_pkg)
-                    
-                    # 导入子模块
-                    from hyperliquid.info import Info as _Info
-                    from hyperliquid.utils import constants as _constants
-                    Info = _Info
-                    constants = _constants
-                    HAS_HYPERLIQUID_SDK = True
-                    return True
-        
-        return False
-    except Exception as e:
-        logger.debug(f"导入 hyperliquid SDK 失败: {e}")
-        return False
-
-# 执行导入
-if not _try_import_hyperliquid():
-    logger.warning(
-        "hyperliquid SDK 未安装或导入失败，WebSocket 功能不可用。"
-        "请运行: pip install hyperliquid-python-sdk"
-    )
-=======
 from hyperliquid.info import Info
 from hyperliquid.utils import constants
->>>>>>> Incoming (Background Agent changes)
 
 
 class WebSocketClient:

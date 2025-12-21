@@ -1,4 +1,4 @@
-# Data 模块 - WebSocket + REST 混合数据架构
+# WebSocket + REST 混合数据架构
 
 ## 概述
 
@@ -15,7 +15,6 @@
 ## 文件结构
 
 ```
-data/
 ├── __init__.py          # 模块导出 + 路径修复
 ├── sqlite_cache.py      # SQLite 缓存模块
 ├── rest_client.py       # REST 客户端（带限流+缓存）
@@ -31,7 +30,6 @@ data/
 ### 安装依赖
 
 ```bash
-cd abx
 uv sync
 ```
 

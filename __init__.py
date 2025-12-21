@@ -28,7 +28,7 @@ import os
 
 from .sqlite_cache import SQLiteCache
 from .rest_client import RESTClient
-from .websocket_client import WebSocketClient, HAS_HYPERLIQUID_SDK
+from .websocket_client import WebSocketClient
 from .manager import DataManager
 from .analyzer import DelayCorrelationAnalyzer
 
@@ -38,7 +38,6 @@ __all__ = [
     "WebSocketClient",
     "DataManager",
     "DelayCorrelationAnalyzer",
-    "HAS_HYPERLIQUID_SDK",
 ]
 
 __version__ = "1.0.0"

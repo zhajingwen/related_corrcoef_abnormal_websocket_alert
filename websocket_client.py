@@ -76,6 +76,8 @@ class WebSocketClient:
         
         self._running = False
         self.subscriptions.clear()
+        if self._info:
+            self._info = None
         logger.info("WebSocket 连接已停止")
     
     def subscribe_candles(

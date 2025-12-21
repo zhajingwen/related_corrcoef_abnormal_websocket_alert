@@ -61,6 +61,7 @@ def sender(msg, url=None, title='', del_blank_row=True):
     }
     headers = {'Content-Type': 'application/json'}
     num = 0
+    res = None
     while True:
         try:
             res = requests.request("POST", url, headers=headers, data=json.dumps(data))
@@ -69,7 +70,8 @@ def sender(msg, url=None, title='', del_blank_row=True):
         except requests.exceptions.RequestException:
             num += 1
         if num > 3:
-            logger.error(f'lark 告警调用失败：{res.text} {url} {num} {data}')
+            error_msg = res.text if res else "无响应"
+            logger.error(f'lark 告警调用失败：{error_msg} {url} {num} {data}')
             break
     return None
 
@@ -102,6 +104,7 @@ def sender_colourful(url, content, title=''):
     }
 
     num = 0  # 初始化重试计数器
+    response = None
     while True:
         try:
             response = requests.post(url, headers=headers, data=json.dumps(message))
@@ -110,6 +113,7 @@ def sender_colourful(url, content, title=''):
         except requests.exceptions.RequestException:
             num += 1
         if num > 3:
-            logger.error(f'lark 告警调用失败：{url} {num} {message}')
+            error_msg = response.text if response else "无响应"
+            logger.error(f'lark 彩色告警调用失败：{error_msg} {url} {num} {message}')
             break
     return None

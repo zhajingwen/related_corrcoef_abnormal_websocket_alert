@@ -76,6 +76,7 @@ class WebSocketClient:
         
         self._running = False
         self.subscriptions.clear()
+        self._callbacks.clear()  # 清理所有回调函数，避免内存泄漏
         
         if self._info:
             try:
@@ -148,7 +149,7 @@ class WebSocketClient:
                     "coin": coin,
                     "interval": interval
                 },
-                lambda data: self._handle_candle(cache_key, data)
+                lambda data, ck=cache_key: self._handle_candle(ck, data)  # 使用默认参数绑定避免闭包后期绑定问题
             )
             self.subscriptions.add(cache_key)
             logger.info(f"已订阅 K 线 | {coin} | {interval}")
@@ -177,6 +178,7 @@ class WebSocketClient:
                     }
                 )
                 self.subscriptions.discard(cache_key)
+                self._callbacks.pop(cache_key, None)  # 清理该订阅的回调函数
                 logger.info(f"已取消订阅 | {coin} | {interval}")
             except Exception as e:
                 logger.error(f"取消订阅失败 | {coin} | {interval} | {e}")

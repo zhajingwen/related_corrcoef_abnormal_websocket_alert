@@ -6,6 +6,7 @@
 """
 
 import logging
+import threading
 from collections import OrderedDict
 from typing import Optional
 import pandas as pd
@@ -51,6 +52,7 @@ class DataManager:
         
         # BTC 数据缓存（使用 OrderedDict 实现 LRU 缓存，避免内存无限增长）
         self._btc_cache: OrderedDict[tuple[str, str], pd.DataFrame] = OrderedDict()
+        self._btc_cache_lock = threading.Lock()  # 保护 BTC 缓存的线程锁
         
         logger.info(f"数据管理器初始化 | 交易所: {exchange_name} | 数据库: {db_path}")
     
@@ -79,7 +81,7 @@ class DataManager:
     
     def get_btc_data(self, timeframe: str, period: str) -> Optional[pd.DataFrame]:
         """
-        获取 BTC 数据（带 LRU 内存缓存）
+        获取 BTC 数据（带 LRU 内存缓存，线程安全）
         
         Args:
             timeframe: K 线周期
@@ -90,24 +92,26 @@ class DataManager:
         """
         cache_key = (timeframe, period)
         
-        if cache_key in self._btc_cache:
-            # 移到末尾（标记为最近使用）
-            self._btc_cache.move_to_end(cache_key)
-            logger.debug(f"BTC 数据缓存命中 | {timeframe}/{period}")
-            return self._btc_cache[cache_key].copy()
+        with self._btc_cache_lock:
+            if cache_key in self._btc_cache:
+                # 移到末尾（标记为最近使用）
+                self._btc_cache.move_to_end(cache_key)
+                logger.debug(f"BTC 数据缓存命中 | {timeframe}/{period}")
+                return self._btc_cache[cache_key].copy()
         
         btc_symbol = "BTC/USDC:USDC"
         try:
             df = self.get_ohlcv(btc_symbol, timeframe, period)
             if not df.empty:
-                # 添加到缓存
-                self._btc_cache[cache_key] = df
-                
-                # 如果超过最大缓存大小，移除最旧的条目
-                while len(self._btc_cache) > self.MAX_BTC_CACHE_SIZE:
-                    oldest_key = next(iter(self._btc_cache))
-                    self._btc_cache.pop(oldest_key)
-                    logger.debug(f"BTC 缓存已满，移除最旧条目 | {oldest_key}")
+                with self._btc_cache_lock:
+                    # 添加到缓存
+                    self._btc_cache[cache_key] = df
+                    
+                    # 如果超过最大缓存大小，移除最旧的条目
+                    while len(self._btc_cache) > self.MAX_BTC_CACHE_SIZE:
+                        oldest_key = next(iter(self._btc_cache))
+                        self._btc_cache.pop(oldest_key)
+                        logger.debug(f"BTC 缓存已满，移除最旧条目 | {oldest_key}")
                 
                 return df.copy()
         except Exception as e:
@@ -116,8 +120,9 @@ class DataManager:
         return None
     
     def clear_btc_cache(self):
-        """清除 BTC 内存缓存"""
-        self._btc_cache.clear()
+        """清除 BTC 内存缓存（线程安全）"""
+        with self._btc_cache_lock:
+            self._btc_cache.clear()
         logger.debug("BTC 内存缓存已清除")
     
     def get_usdc_perpetuals(self) -> list[str]:
@@ -129,10 +134,12 @@ class DataManager:
         return self.rest_client.load_markets()
     
     def get_cache_stats(self) -> dict:
-        """获取缓存统计信息"""
+        """获取缓存统计信息（线程安全）"""
+        with self._btc_cache_lock:
+            btc_cache_keys = list(self._btc_cache.keys())
         return {
             "sqlite": self.cache.get_cache_stats(),
-            "btc_memory_cache": list(self._btc_cache.keys())
+            "btc_memory_cache": btc_cache_keys
         }
     
     def prefetch_btc_data(self, timeframes: list[str], periods: list[str]):

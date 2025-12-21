@@ -105,7 +105,11 @@ class SQLiteCache:
         except sqlite3.Error:
             # 发生错误时回滚事务
             if self._local.conn:
-                self._local.conn.rollback()
+                try:
+                    self._local.conn.rollback()
+                except Exception:
+                    # 如果连接已损坏，rollback 可能失败，忽略该错误
+                    pass
             raise
     
     def close(self):

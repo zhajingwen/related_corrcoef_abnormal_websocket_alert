@@ -194,9 +194,11 @@ class RESTClient:
         # 检查是否需要下载更早的数据
         if oldest_cached > since_ms:
             # 需要下载更早的历史数据
+            # 使用 oldest_cached - ms_per_bar 确保时间戳对齐到 K 线边界
+            until_ms = oldest_cached - ms_per_bar
             logger.debug(f"下载历史数据 | {symbol} | {timeframe} | "
-                        f"从 {since_ms} 到 {oldest_cached}")
-            historical_df = self._download_range(symbol, timeframe, since_ms, oldest_cached - 1)
+                        f"从 {since_ms} 到 {until_ms}")
+            historical_df = self._download_range(symbol, timeframe, since_ms, until_ms)
             if not historical_df.empty:
                 self.cache.save_ohlcv(symbol, timeframe, historical_df)
         

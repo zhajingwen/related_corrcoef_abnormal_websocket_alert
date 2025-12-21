@@ -1,9 +1,16 @@
 import requests
 import json
 import logging
+import os
+import time
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('Lark Alert')
+
+# 重试配置
+MAX_RETRIES = 3
+RETRY_DELAY = 1  # 秒
+REQUEST_TIMEOUT = 10  # 秒
 
 def sender(msg, url=None, title='', del_blank_row=True):
     """
@@ -18,7 +25,12 @@ def sender(msg, url=None, title='', del_blank_row=True):
     :param msg: 需要发送的消息
     """
     if not url:
-        url = 'https://open.larksuite.com/open-apis/bot/v2/hook/7bbfc97b-adc9c'
+        # 从环境变量读取默认的 webhook ID
+        default_webhook_id = os.getenv('LARKBOT_ID')
+        if not default_webhook_id:
+            logger.error("未提供 url 且环境变量 LARKBOT_ID 未设置")
+            return None
+        url = f'https://open.feishu.cn/open-apis/bot/v2/hook/{default_webhook_id}'
     msg_list = []
     for i in msg.strip().split('\n'):
         i = i.strip()
@@ -48,7 +60,6 @@ def sender(msg, url=None, title='', del_blank_row=True):
         msg_list.append(msg_row)
 
     data = {
-        "email": "drake.shi@bitget.com",
         "msg_type": "post",
         "content": {
             "post": {
@@ -60,19 +71,25 @@ def sender(msg, url=None, title='', del_blank_row=True):
         }
     }
     headers = {'Content-Type': 'application/json'}
-    num = 0
-    res = None
-    while True:
+    
+    for attempt in range(MAX_RETRIES):
         try:
-            res = requests.request("POST", url, headers=headers, data=json.dumps(data))
-            logger.info(f'lark 告警调用成功：{res.text}')
-            return res.text
-        except requests.exceptions.RequestException:
-            num += 1
-        if num > 3:
-            error_msg = res.text if res else "无响应"
-            logger.error(f'lark 告警调用失败：{error_msg} {url} {num} {data}')
-            break
+            res = requests.post(url, headers=headers, data=json.dumps(data), timeout=REQUEST_TIMEOUT)
+            
+            # 检查 HTTP 状态码
+            if res.status_code == 200:
+                logger.info(f'lark 告警调用成功：{res.text}')
+                return res.text
+            else:
+                logger.warning(f'lark 告警返回错误状态码: {res.status_code}, 响应: {res.text}')
+        except requests.exceptions.RequestException as e:
+            logger.warning(f'lark 告警网络错误 (尝试 {attempt + 1}/{MAX_RETRIES}): {e}')
+        
+        # 如果不是最后一次尝试，等待后重试
+        if attempt < MAX_RETRIES - 1:
+            time.sleep(RETRY_DELAY)
+    
+    logger.error(f'lark 告警调用失败，已重试 {MAX_RETRIES} 次')
     return None
 
 def sender_colourful(url, content, title=''):
@@ -80,7 +97,6 @@ def sender_colourful(url, content, title=''):
     https://open.larksuite.com/document/common-capabilities/message-card/message-cards-content/using-markdown-tags
     """
     message = {
-        "email": "drake.shi@bitget.com",
         "msg_type": "interactive",
         "card": {
             "config": {
@@ -103,17 +119,22 @@ def sender_colourful(url, content, title=''):
         'Content-Type': 'application/json'
     }
 
-    num = 0  # 初始化重试计数器
-    response = None
-    while True:
+    for attempt in range(MAX_RETRIES):
         try:
-            response = requests.post(url, headers=headers, data=json.dumps(message))
-            logger.info(f'lark 彩色告警调用成功：{response.text}')
-            return response.text  # 成功后返回，避免无限循环
-        except requests.exceptions.RequestException:
-            num += 1
-        if num > 3:
-            error_msg = response.text if response else "无响应"
-            logger.error(f'lark 彩色告警调用失败：{error_msg} {url} {num} {message}')
-            break
+            response = requests.post(url, headers=headers, data=json.dumps(message), timeout=REQUEST_TIMEOUT)
+            
+            # 检查 HTTP 状态码
+            if response.status_code == 200:
+                logger.info(f'lark 彩色告警调用成功：{response.text}')
+                return response.text
+            else:
+                logger.warning(f'lark 彩色告警返回错误状态码: {response.status_code}, 响应: {response.text}')
+        except requests.exceptions.RequestException as e:
+            logger.warning(f'lark 彩色告警网络错误 (尝试 {attempt + 1}/{MAX_RETRIES}): {e}')
+        
+        # 如果不是最后一次尝试，等待后重试
+        if attempt < MAX_RETRIES - 1:
+            time.sleep(RETRY_DELAY)
+    
+    logger.error(f'lark 彩色告警调用失败，已重试 {MAX_RETRIES} 次')
     return None

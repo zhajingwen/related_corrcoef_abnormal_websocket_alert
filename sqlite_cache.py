@@ -7,6 +7,7 @@ SQLite 缓存模块
 
 import sqlite3
 import logging
+import threading
 from pathlib import Path
 from contextlib import contextmanager
 from typing import Optional
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class SQLiteCache:
-    """SQLite K 线数据缓存"""
+    """SQLite K 线数据缓存（线程安全）"""
     
     def __init__(self, db_path: str = "hyperliquid_data.db"):
         """
@@ -26,6 +27,7 @@ class SQLiteCache:
             db_path: 数据库文件路径
         """
         self.db_path = Path(db_path)
+        self._local = threading.local()  # 线程本地存储
         self._init_db()
     
     def _init_db(self):
@@ -61,12 +63,31 @@ class SQLiteCache:
     
     @contextmanager
     def _get_connection(self):
-        """获取数据库连接（上下文管理器）"""
-        conn = sqlite3.connect(self.db_path)
+        """
+        获取数据库连接（上下文管理器，线程安全）
+        
+        每个线程使用独立的连接，避免多线程并发问题。
+        """
+        # 检查当前线程是否已有连接
+        if not hasattr(self._local, 'conn') or self._local.conn is None:
+            self._local.conn = sqlite3.connect(
+                self.db_path,
+                check_same_thread=False,
+                timeout=30.0  # 增加超时时间，避免并发时锁等待超时
+            )
+        
         try:
-            yield conn
-        finally:
-            conn.close()
+            yield self._local.conn
+        except sqlite3.Error as e:
+            # 发生错误时回滚事务
+            self._local.conn.rollback()
+            raise
+    
+    def close(self):
+        """关闭当前线程的数据库连接"""
+        if hasattr(self._local, 'conn') and self._local.conn is not None:
+            self._local.conn.close()
+            self._local.conn = None
     
     def save_ohlcv(self, symbol: str, timeframe: str, df: pd.DataFrame) -> int:
         """

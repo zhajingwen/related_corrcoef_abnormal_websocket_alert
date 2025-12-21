@@ -76,8 +76,27 @@ class WebSocketClient:
         
         self._running = False
         self.subscriptions.clear()
+        
         if self._info:
-            self._info = None
+            try:
+                # 尝试关闭 WebSocket 连接
+                # 根据 hyperliquid SDK 的实现方式尝试不同的关闭方法
+                if hasattr(self._info, 'close'):
+                    self._info.close()
+                elif hasattr(self._info, 'disconnect'):
+                    self._info.disconnect()
+                elif hasattr(self._info, 'ws') and self._info.ws:
+                    if hasattr(self._info.ws, 'close'):
+                        self._info.ws.close()
+                # 尝试关闭 websocket manager
+                if hasattr(self._info, 'ws_manager') and self._info.ws_manager:
+                    if hasattr(self._info.ws_manager, 'close'):
+                        self._info.ws_manager.close()
+            except Exception as e:
+                logger.warning(f"关闭 WebSocket 连接时出错: {e}")
+            finally:
+                self._info = None
+        
         logger.info("WebSocket 连接已停止")
     
     def subscribe_candles(

@@ -73,8 +73,33 @@ class RESTClient:
     
     @staticmethod
     def period_to_bars(period: str, timeframe: str) -> int:
-        """将时间周期转换为 K 线总条数"""
-        days = int(period.rstrip('d'))
+        """
+        将时间周期转换为 K 线总条数
+        
+        支持的格式：
+            - d: 天，如 "7d", "30d"
+            - w: 周，如 "1w", "2w"
+            - M: 月，如 "1M", "3M"（按30天计算）
+        """
+        if not period or len(period) < 2:
+            raise ValueError(f"无效的 period 格式: {period}")
+        
+        unit = period[-1]
+        try:
+            value = int(period[:-1])
+        except ValueError:
+            raise ValueError(f"无效的 period 格式: {period}，数值部分必须是整数")
+        
+        # 转换为天数
+        if unit == 'd':
+            days = value
+        elif unit == 'w':
+            days = value * 7
+        elif unit == 'M':
+            days = value * 30  # 按30天计算
+        else:
+            raise ValueError(f"不支持的 period 格式: {period}，支持 d/w/M（如 7d, 1w, 1M）")
+        
         timeframe_minutes = RESTClient.timeframe_to_minutes(timeframe)
         bars_per_day = int(24 * 60 / timeframe_minutes)
         return days * bars_per_day

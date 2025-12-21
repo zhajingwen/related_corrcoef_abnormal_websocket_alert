@@ -1,7 +1,7 @@
 import time
 import logging
 from datetime import datetime, timedelta
-from utils.config import env
+from .config import env
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('Timer Scheduler')
@@ -57,8 +57,14 @@ def scheduled_task(start_time=None, duration=None, weekdays=None):
                         func(*args, **kwargs)
                         logger.info('调度结束')
 
-                        # 等待下一个周期
-                        time.sleep(60 * 60)  # 等待 1 小时，避免重复执行
+                        # 计算到明天同一时间需要等待的秒数
+                        next_run = start + timedelta(days=1)
+                        wait_seconds = (next_run - datetime.now()).total_seconds()
+                        # 确保至少等待到窗口结束后，防止在同一窗口内重复执行
+                        min_wait = (end - datetime.now()).total_seconds() + 60
+                        wait_seconds = max(wait_seconds, min_wait, 60)
+                        logger.info(f'等待 {wait_seconds:.0f} 秒后进行下一次调度')
+                        time.sleep(wait_seconds)
                     else:
                         # 不在执行时间范围内，等待一段时间再检查
                         time.sleep(10)

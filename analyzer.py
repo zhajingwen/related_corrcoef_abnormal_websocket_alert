@@ -16,8 +16,8 @@ from .manager import DataManager
 
 # 尝试导入飞书通知（可选）
 try:
-    from utils.lark_bot import sender
-    from utils.config import lark_bot_id
+    from .utils.lark_bot import sender
+    from .utils.config import lark_bot_id
     HAS_LARK_BOT = True
 except ImportError:
     HAS_LARK_BOT = False

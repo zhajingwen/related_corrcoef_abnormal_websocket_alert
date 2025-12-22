@@ -30,25 +30,72 @@ npx task-master-ai <command>
 
 在项目根目录创建 `.env` 文件，并添加以下内容（选择一个提供商）：
 
+**推荐方式**：复制 `env.example` 文件为 `.env`，然后取消注释并填入你选择的提供商 API 密钥。
+
 ```bash
-# Anthropic (Claude) - 推荐
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
-
-# 或使用 OpenAI
-# OPENAI_API_KEY=your_openai_api_key_here
-
-# 或使用 Perplexity
-# PERPLEXITY_API_KEY=your_perplexity_api_key_here
-
-# 或使用 Google Gemini
-# GOOGLE_GEMINI_API_KEY=your_google_gemini_api_key_here
+cp env.example .env
+# 然后编辑 .env 文件，填入你的 API 密钥
 ```
 
-**获取 API 密钥**：
-- Anthropic: https://console.anthropic.com/
-- OpenAI: https://platform.openai.com/api-keys
-- Perplexity: https://www.perplexity.ai/settings/api
-- Google Gemini: https://makersuite.google.com/app/apikey
+**支持的 AI 提供商**（按推荐顺序）：
+
+1. **Anthropic (Claude)** - 推荐，性能优秀
+   ```bash
+   ANTHROPIC_API_KEY=your_anthropic_api_key_here
+   ```
+   获取密钥：https://console.anthropic.com/
+
+2. **OpenAI (GPT-4, GPT-3.5)** - 广泛使用
+   ```bash
+   OPENAI_API_KEY=your_openai_api_key_here
+   ```
+   获取密钥：https://platform.openai.com/api-keys
+
+3. **Perplexity** - 推荐用于研究，可访问实时信息
+   ```bash
+   PERPLEXITY_API_KEY=your_perplexity_api_key_here
+   ```
+   获取密钥：https://www.perplexity.ai/settings/api
+
+4. **Google Gemini**
+   ```bash
+   GOOGLE_GEMINI_API_KEY=your_google_gemini_api_key_here
+   # 或
+   GOOGLE_API_KEY=your_google_api_key_here
+   ```
+   获取密钥：https://makersuite.google.com/app/apikey
+
+5. **xAI (Grok)**
+   ```bash
+   XAI_API_KEY=your_xai_api_key_here
+   ```
+   获取密钥：https://x.ai/
+
+6. **OpenRouter** - 支持多种模型
+   ```bash
+   OPENROUTER_API_KEY=your_openrouter_api_key_here
+   ```
+   获取密钥：https://openrouter.ai/keys
+
+7. **Azure OpenAI**
+   ```bash
+   AZURE_OPENAI_API_KEY=your_azure_openai_api_key_here
+   AZURE_OPENAI_ENDPOINT=your_azure_endpoint_here
+   ```
+   获取密钥：https://azure.microsoft.com/en-us/products/ai-services/openai-service
+
+8. **Mistral AI**
+   ```bash
+   MISTRAL_API_KEY=your_mistral_api_key_here
+   ```
+   获取密钥：https://console.mistral.ai/
+
+9. **Ollama** - 本地运行，无需 API 密钥
+   ```bash
+   OLLAMA_BASE_URL=http://localhost:11434
+   OLLAMA_MODEL=llama2  # 或其他模型名称
+   ```
+   安装：https://ollama.ai/
 
 ### 3. 使用 Task Master AI
 

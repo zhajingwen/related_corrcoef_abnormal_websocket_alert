@@ -111,13 +111,14 @@ class SQLiteCache:
                 try:
                     conn_to_use.rollback()
                 except Exception as rollback_err:
-                    # 连接已损坏，标记为需要重建
-                    logger.warning(f"连接回滚失败，将在下次访问时重建连接: {rollback_err}")
+                    # 连接已损坏，先清理连接引用，再从列表移除
+                    logger.warning(f"连接回滚失败，重置连接: {rollback_err}")
+                    # 关键修复：先将 self._local.conn 设为 None，确保下次访问会创建新连接
+                    self._local.conn = None
                     # 从跟踪列表中移除损坏的连接
                     with self._connections_lock:
                         if conn_to_use in self._connections:
                             self._connections.remove(conn_to_use)
-                    self._local.conn = None
             raise
         except Exception as e:
             # 捕获其他异常，确保连接状态正确

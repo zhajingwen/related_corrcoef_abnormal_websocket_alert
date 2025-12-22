@@ -81,11 +81,14 @@ class DelayCorrelationAnalyzer:
     MIN_POINTS_FOR_CORR_CALC = 30
     # 数据分析所需的最小数据点数
     MIN_DATA_POINTS_FOR_ANALYSIS = 100
-    
+
     # 异常模式检测阈值
     LONG_TERM_CORR_THRESHOLD = 0.6   # 长期相关系数阈值
     SHORT_TERM_CORR_THRESHOLD = 0.3  # 短期相关系数阈值
     CORR_DIFF_THRESHOLD = 0.5        # 相关系数差值阈值
+
+    # 数据质量阈值
+    MAX_NAN_RATIO = 0.05  # 最大允许 NaN 值比例（5%），确保数据质量
     
     def __init__(
         self,
@@ -276,14 +279,14 @@ class DelayCorrelationAnalyzer:
             logger.warning(f"数据量不足，跳过 | 币种: {coin} | {timeframe}/{period}")
             return None
         
-        # 数据验证：检查NaN值比例
+        # 数据验证：检查NaN值比例（使用更严格的5%阈值）
         btc_nan_ratio = btc_df_aligned['return'].isna().sum() / len(btc_df_aligned)
-        if btc_nan_ratio > 0.1:
+        if btc_nan_ratio > self.MAX_NAN_RATIO:
             logger.warning(f"BTC数据包含过多NaN值 ({btc_nan_ratio:.1%})，跳过 | 币种: {coin} | {timeframe}/{period}")
             return None
-        
+
         alt_nan_ratio = alt_df_aligned['return'].isna().sum() / len(alt_df_aligned)
-        if alt_nan_ratio > 0.1:
+        if alt_nan_ratio > self.MAX_NAN_RATIO:
             logger.warning(f"山寨币数据包含过多NaN值 ({alt_nan_ratio:.1%})，跳过 | 币种: {coin} | {timeframe}/{period}")
             return None
         

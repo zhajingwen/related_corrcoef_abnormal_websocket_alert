@@ -99,18 +99,26 @@ def _cleanup_pool(pool: Optional[redis.ConnectionPool]):
             pass
 
 
-def redis_cli() -> redis.Redis:
+def redis_cli(raise_on_error: bool = True) -> Optional[redis.Redis]:
     """
-    获取 Redis 客户端单例（线程安全，带重试机制）
-    
+    获取 Redis 客户端单例（线程安全，带重试机制和降级策略）
+
     使用模块级连接池，避免重复创建连接池导致资源泄漏。
     如果连接失败会自动重试，并在冷却期后允许再次尝试。
-    
+
+    Args:
+        raise_on_error: 是否在连接失败时抛出异常。
+                       True: 抛出 ConnectionError（适用于关键业务）
+                       False: 返回 None 并记录警告（适用于可降级的功能，如告警去重）
+
+    Returns:
+        成功返回 Redis 客户端，失败时根据 raise_on_error 参数决定行为
+
     Raises:
-        redis.ConnectionError: 如果无法建立连接
+        redis.ConnectionError: 如果无法建立连接且 raise_on_error=True
     """
     global _connection_pool, _redis_client, _last_connection_attempt
-    
+
     # 快速路径：已有有效连接
     if _redis_client is not None:
         try:
@@ -124,31 +132,40 @@ def redis_cli() -> redis.Redis:
                 _cleanup_pool(_connection_pool)
                 _redis_client = None
                 _connection_pool = None
-    
+
     with _init_lock:
         # 双重检查
         if _redis_client is not None:
             return _redis_client
-        
+
         # 检查冷却期（避免频繁重试）
         now = time.time()
         if _last_connection_attempt > 0 and (now - _last_connection_attempt) < _connection_cooldown:
             remaining = _connection_cooldown - (now - _last_connection_attempt)
-            raise redis.ConnectionError(
-                f"Redis 连接处于冷却期，请在 {remaining:.1f} 秒后重试"
-            )
-        
+            error_msg = f"Redis 连接处于冷却期，请在 {remaining:.1f} 秒后重试"
+
+            if raise_on_error:
+                raise redis.ConnectionError(error_msg)
+            else:
+                logger.warning(f"{error_msg}，使用降级模式（返回 None）")
+                return None
+
         _last_connection_attempt = now
-        
+
         # 注意：不记录具体的 host 信息以避免敏感信息泄露
         logger.debug(f'Redis 连接中... (密码: {"已配置" if redis_password else "未设置"})')
-        
+
         # 尝试连接（带重试）
         client = _try_connect()
-        
+
         if client is None:
-            raise redis.ConnectionError("无法建立 Redis 连接")
-        
+            error_msg = "无法建立 Redis 连接"
+            if raise_on_error:
+                raise redis.ConnectionError(error_msg)
+            else:
+                logger.warning(f"{error_msg}，使用降级模式（返回 None）")
+                return None
+
         return client
 
 

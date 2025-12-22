@@ -101,40 +101,39 @@ class WebSocketClient:
         with self._state_lock:
             if not self._running:
                 return
-            
-            # 标记为停止中，阻止新的订阅
+
+            # 先标记为停止，阻止新订阅
             self._running = False
+
+            # 在持有锁期间完成所有关键清理，避免竞态条件
+            with self._subscriptions_lock:
+                active_subs = list(self.subscriptions)
+                self.subscriptions.clear()
+
+            with self._callbacks_lock:
+                self._callbacks.clear()
+
             info_to_close = self._info
             self._info = None
-        
-        # 1. 先取消所有活跃订阅，确保服务器端连接清理
-        with self._subscriptions_lock:
-            active_subs = list(self.subscriptions)
-        
+
+        # 现在可以安全地在锁外执行耗时的取消订阅操作
         for coin, interval in active_subs:
             try:
                 self._unsubscribe_candles_internal(coin, interval, info_to_close)
             except Exception as e:
                 logger.debug(f"停止时取消订阅失败 (正常现象) | {coin} | {interval} | {e}")
-        
-        # 清理订阅和回调
-        with self._subscriptions_lock:
-            self.subscriptions.clear()
-        
-        with self._callbacks_lock:
-            self._callbacks.clear()
-        
+
+        # 关闭连接
         if info_to_close:
             try:
-                # 尝试关闭 WebSocket 连接
                 self._close_info_connection(info_to_close)
             except Exception as e:
                 logger.warning(f"关闭 WebSocket 连接时出错: {e}")
-        
+
         # 清理数据缓存以释放内存
         with self._cache_lock:
             self.data_cache.clear()
-        
+
         logger.info("WebSocket 连接已停止")
     
     @staticmethod
@@ -385,13 +384,15 @@ class WebSocketClient:
                     error_msg = f"回调执行失败 | {cache_key} | {type(e).__name__}: {e}"
                     logger.error(error_msg, exc_info=True)
                     callback_errors.append(error_msg)
-            
-            # 如果回调错误过多，记录警告（可选：可以添加告警机制）
+
+            # 如果所有回调都失败，可能存在系统性问题（如数据格式变更）
             if callback_errors and len(callback_errors) == len(callbacks):
-                logger.warning(
-                    f"所有回调都执行失败 | {cache_key} | "
+                logger.error(
+                    f"所有回调都执行失败，可能存在系统性问题 | {cache_key} | "
                     f"错误数: {len(callback_errors)}"
                 )
+                # 可选：触发飞书告警（需要导入 lark_bot）
+                # 为了避免引入循环依赖，这里仅记录错误日志
         
         except Exception as e:
             logger.error(f"处理 K 线数据失败 | {cache_key} | {e}")

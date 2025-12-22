@@ -357,9 +357,8 @@ class RESTClient:
     def _process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         """处理 DataFrame：添加 return 和 volume_usd 列"""
         if df.empty:
-            df['return'] = pd.Series(dtype=float)
-            df['volume_usd'] = pd.Series(dtype=float)
-            return df
+            # 使用 assign 确保空 DataFrame 也能正确添加列
+            return df.assign(**{'return': pd.Series(dtype=float), 'volume_usd': pd.Series(dtype=float)})
         
         df = df.copy()
         df['return'] = df['Close'].pct_change().fillna(0)

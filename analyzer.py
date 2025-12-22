@@ -14,7 +14,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from .manager import DataManager
+from .manager import DataManager, BTC_SYMBOL
 
 # 尝试导入飞书通知（可选）
 try:
@@ -105,7 +105,7 @@ class DelayCorrelationAnalyzer:
         self.exchange_name = exchange_name
         self.timeframes = default_timeframes or ["1m", "5m"]
         self.periods = default_periods or ["1d", "7d", "30d", "60d"]
-        self.btc_symbol = "BTC/USDC:USDC"
+        self.btc_symbol = BTC_SYMBOL
         
         # 初始化数据管理器
         self.data_manager = DataManager(

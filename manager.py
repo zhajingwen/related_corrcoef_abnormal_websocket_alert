@@ -16,6 +16,9 @@ from .rest_client import RESTClient
 
 logger = logging.getLogger(__name__)
 
+# BTC 交易对符号常量
+BTC_SYMBOL = "BTC/USDC:USDC"
+
 
 class DataManager:
     """
@@ -54,8 +57,14 @@ class DataManager:
         self._btc_cache: OrderedDict[tuple[str, str], pd.DataFrame] = OrderedDict()
         self._btc_cache_lock = threading.Lock()  # 保护 BTC 缓存的线程锁
         
+        # 下载锁：防止同一数据被多个线程重复下载
+        # 使用字典为每个缓存键维护独立的锁
+        self._download_locks: dict[tuple[str, str], threading.Lock] = {}
+        self._download_locks_lock = threading.Lock()  # 保护 _download_locks 的元锁
+        
         # 缓存命中率统计
         self._cache_stats = {'hits': 0, 'misses': 0}
+        self._cache_stats_lock = threading.Lock()  # 保护缓存统计的锁
         
         logger.info(f"数据管理器初始化 | 交易所: {exchange_name} | 数据库: {db_path}")
     
@@ -82,11 +91,26 @@ class DataManager:
         logger.debug(f"获取数据 | {symbol} | {timeframe} | {period}")
         return self.rest_client.fetch_ohlcv(symbol, timeframe, period)
     
+    def _get_download_lock(self, cache_key: tuple[str, str]) -> threading.Lock:
+        """
+        获取或创建指定缓存键的下载锁
+        
+        Args:
+            cache_key: 缓存键 (timeframe, period)
+        
+        Returns:
+            该缓存键对应的下载锁
+        """
+        with self._download_locks_lock:
+            if cache_key not in self._download_locks:
+                self._download_locks[cache_key] = threading.Lock()
+            return self._download_locks[cache_key]
+    
     def get_btc_data(self, timeframe: str, period: str) -> Optional[pd.DataFrame]:
         """
         获取 BTC 数据（带 LRU 内存缓存，线程安全）
         
-        使用双重检查锁定模式，避免多线程环境下的重复下载。
+        使用下载锁模式，确保同一数据只下载一次，避免多线程环境下的重复下载。
         
         Args:
             timeframe: K 线周期
@@ -97,44 +121,50 @@ class DataManager:
         """
         cache_key = (timeframe, period)
         
-        # 第一次检查（快速路径）
+        # 第一次检查（快速路径，无下载锁）
         with self._btc_cache_lock:
             if cache_key in self._btc_cache:
                 # 记录缓存命中
-                self._cache_stats['hits'] += 1
+                with self._cache_stats_lock:
+                    self._cache_stats['hits'] += 1
                 # 移到末尾（标记为最近使用）
                 self._btc_cache.move_to_end(cache_key)
                 logger.debug(f"BTC 数据缓存命中 | {timeframe}/{period}")
                 return self._btc_cache[cache_key].copy()
-            else:
-                # 记录缓存未命中
-                self._cache_stats['misses'] += 1
         
-        # 缓存未命中，需要下载数据
-        btc_symbol = "BTC/USDC:USDC"
-        try:
-            df = self.get_ohlcv(btc_symbol, timeframe, period)
-            if not df.empty:
-                with self._btc_cache_lock:
-                    # 双重检查：在锁内再次检查缓存，防止其他线程已经下载并缓存了数据
-                    if cache_key in self._btc_cache:
-                        # 其他线程已经下载了，直接返回缓存的数据
-                        self._btc_cache.move_to_end(cache_key)
-                        logger.debug(f"BTC 数据已被其他线程缓存 | {timeframe}/{period}")
-                        return self._btc_cache[cache_key].copy()
+        # 缓存未命中，获取该键的下载锁
+        download_lock = self._get_download_lock(cache_key)
+        
+        with download_lock:
+            # 在下载锁内再次检查缓存（其他线程可能已经下载完成）
+            with self._btc_cache_lock:
+                if cache_key in self._btc_cache:
+                    # 其他线程已经下载了，直接返回缓存的数据
+                    self._btc_cache.move_to_end(cache_key)
+                    logger.debug(f"BTC 数据已被其他线程缓存 | {timeframe}/{period}")
+                    return self._btc_cache[cache_key].copy()
+                else:
+                    # 记录缓存未命中
+                    with self._cache_stats_lock:
+                        self._cache_stats['misses'] += 1
+            
+            # 确实需要下载数据
+            try:
+                df = self.get_ohlcv(BTC_SYMBOL, timeframe, period)
+                if not df.empty:
+                    with self._btc_cache_lock:
+                        # 添加到缓存
+                        self._btc_cache[cache_key] = df
+                        
+                        # 如果超过最大缓存大小，移除最旧的条目
+                        while len(self._btc_cache) > self.MAX_BTC_CACHE_SIZE:
+                            oldest_key = next(iter(self._btc_cache))
+                            self._btc_cache.pop(oldest_key)
+                            logger.debug(f"BTC 缓存已满，移除最旧条目 | {oldest_key}")
                     
-                    # 添加到缓存
-                    self._btc_cache[cache_key] = df
-                    
-                    # 如果超过最大缓存大小，移除最旧的条目
-                    while len(self._btc_cache) > self.MAX_BTC_CACHE_SIZE:
-                        oldest_key = next(iter(self._btc_cache))
-                        self._btc_cache.pop(oldest_key)
-                        logger.debug(f"BTC 缓存已满，移除最旧条目 | {oldest_key}")
-                
-                return df.copy()
-        except Exception as e:
-            logger.error(f"获取 BTC 数据失败 | {timeframe}/{period} | {e}")
+                    return df.copy()
+            except Exception as e:
+                logger.error(f"获取 BTC 数据失败 | {timeframe}/{period} | {e}")
         
         return None
     
@@ -156,11 +186,13 @@ class DataManager:
         """获取缓存统计信息（线程安全）"""
         with self._btc_cache_lock:
             btc_cache_keys = list(self._btc_cache.keys())
+        
+        with self._cache_stats_lock:
             cache_stats = self._cache_stats.copy()
-            
-            # 计算命中率
-            total = cache_stats['hits'] + cache_stats['misses']
-            hit_rate = cache_stats['hits'] / total if total > 0 else 0.0
+        
+        # 计算命中率
+        total = cache_stats['hits'] + cache_stats['misses']
+        hit_rate = cache_stats['hits'] / total if total > 0 else 0.0
             
         return {
             "sqlite": self.cache.get_cache_stats(),

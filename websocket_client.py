@@ -69,13 +69,16 @@ class WebSocketClient:
         
         # 订阅状态
         self.subscriptions: set[tuple[str, str]] = set()
+        self._subscriptions_lock = threading.Lock()  # 保护 subscriptions 的线程锁
         
         # Info 客户端（用于 WebSocket）
         self._info: Optional[Info] = None
         self._running = False
+        self._state_lock = threading.RLock()  # 保护 _running 和 _info 状态的可重入锁
         
         # 回调函数
         self._callbacks: dict[tuple[str, str], list[Callable]] = {}
+        self._callbacks_lock = threading.Lock()  # 保护 _callbacks 的线程锁
         
         # 注册到全局跟踪器，确保程序退出时能够清理资源
         _ws_client_instances.add(self)
@@ -84,43 +87,53 @@ class WebSocketClient:
     
     def start(self):
         """启动 WebSocket 连接"""
-        if self._running:
-            logger.warning("WebSocket 已在运行中")
-            return
-        
-        self._info = Info(self.base_url, skip_ws=False)
-        self._running = True
+        with self._state_lock:
+            if self._running:
+                logger.warning("WebSocket 已在运行中")
+                return
+            
+            self._info = Info(self.base_url, skip_ws=False)
+            self._running = True
         logger.info("WebSocket 连接已启动")
     
     def stop(self):
         """停止 WebSocket 连接"""
-        if not self._running:
-            return
+        with self._state_lock:
+            if not self._running:
+                return
+            
+            # 标记为停止中，阻止新的订阅
+            self._running = False
+            info_to_close = self._info
+            self._info = None
         
         # 1. 先取消所有活跃订阅，确保服务器端连接清理
-        active_subs = list(self.subscriptions)
+        with self._subscriptions_lock:
+            active_subs = list(self.subscriptions)
+        
         for coin, interval in active_subs:
             try:
-                self.unsubscribe_candles(coin, interval)
+                self._unsubscribe_candles_internal(coin, interval, info_to_close)
             except Exception as e:
                 logger.debug(f"停止时取消订阅失败 (正常现象) | {coin} | {interval} | {e}")
         
-        self._running = False
-        self.subscriptions.clear()
-        self._callbacks.clear()  # 清理所有回调函数，避免内存泄漏
+        # 清理订阅和回调
+        with self._subscriptions_lock:
+            self.subscriptions.clear()
         
-        if self._info:
+        with self._callbacks_lock:
+            self._callbacks.clear()
+        
+        if info_to_close:
             try:
                 # 尝试关闭 WebSocket 连接
-                # 根据 hyperliquid SDK 的实现方式尝试不同的关闭方法
-                self._close_info_connection(self._info)
+                self._close_info_connection(info_to_close)
             except Exception as e:
                 logger.warning(f"关闭 WebSocket 连接时出错: {e}")
-            finally:
-                self._info = None
         
         # 清理数据缓存以释放内存
-        self.data_cache.clear()
+        with self._cache_lock:
+            self.data_cache.clear()
         
         logger.info("WebSocket 连接已停止")
     
@@ -220,9 +233,15 @@ class WebSocketClient:
         Returns:
             是否订阅成功
         """
-        if not self._running:
-            logger.error("WebSocket 未启动，请先调用 start()")
-            return False
+        # 获取当前状态的快照（线程安全）
+        with self._state_lock:
+            if not self._running:
+                logger.error("WebSocket 未启动，请先调用 start()")
+                return False
+            info = self._info
+            if info is None:
+                logger.error("WebSocket 连接不可用")
+                return False
         
         if interval not in self.SUPPORTED_INTERVALS:
             logger.error(f"不支持的 K 线周期: {interval}，支持: {self.SUPPORTED_INTERVALS}")
@@ -235,19 +254,20 @@ class WebSocketClient:
             if cache_key not in self.data_cache:
                 self.data_cache[cache_key] = deque(maxlen=self.max_cache_size)
         
-        # 注册回调（去重检查）
+        # 注册回调（线程安全，去重检查）
         if callback:
-            if cache_key not in self._callbacks:
-                self._callbacks[cache_key] = []
-            # 检查回调是否已存在，避免重复注册
-            if callback not in self._callbacks[cache_key]:
-                self._callbacks[cache_key].append(callback)
-            else:
-                logger.debug(f"回调已存在，跳过重复注册 | {coin} | {interval}")
+            with self._callbacks_lock:
+                if cache_key not in self._callbacks:
+                    self._callbacks[cache_key] = []
+                # 检查回调是否已存在，避免重复注册
+                if callback not in self._callbacks[cache_key]:
+                    self._callbacks[cache_key].append(callback)
+                else:
+                    logger.debug(f"回调已存在，跳过重复注册 | {coin} | {interval}")
         
         # 订阅
         try:
-            self._info.subscribe(
+            info.subscribe(
                 {
                     "type": "candle",
                     "coin": coin,
@@ -255,7 +275,8 @@ class WebSocketClient:
                 },
                 partial(self._handle_candle, cache_key)
             )
-            self.subscriptions.add(cache_key)
+            with self._subscriptions_lock:
+                self.subscriptions.add(cache_key)
             logger.info(f"已订阅 K 线 | {coin} | {interval}")
             return True
         except Exception as e:
@@ -272,20 +293,44 @@ class WebSocketClient:
         """
         cache_key = (coin, interval)
         
-        if cache_key in self.subscriptions:
-            try:
-                self._info.unsubscribe(
+        # 检查是否已订阅（线程安全）
+        with self._subscriptions_lock:
+            if cache_key not in self.subscriptions:
+                return
+        
+        # 获取 info 快照
+        with self._state_lock:
+            info = self._info
+        
+        self._unsubscribe_candles_internal(coin, interval, info)
+    
+    def _unsubscribe_candles_internal(self, coin: str, interval: str, info: Optional[Info]):
+        """
+        取消订阅 K 线数据（内部方法，用于 stop() 调用）
+        
+        Args:
+            coin: 币种符号
+            interval: K 线周期
+            info: Info 实例
+        """
+        cache_key = (coin, interval)
+        
+        try:
+            if info is not None:
+                info.unsubscribe(
                     {
                         "type": "candle",
                         "coin": coin,
                         "interval": interval
                     }
                 )
+            with self._subscriptions_lock:
                 self.subscriptions.discard(cache_key)
+            with self._callbacks_lock:
                 self._callbacks.pop(cache_key, None)  # 清理该订阅的回调函数
-                logger.info(f"已取消订阅 | {coin} | {interval}")
-            except Exception as e:
-                logger.error(f"取消订阅失败 | {coin} | {interval} | {e}")
+            logger.info(f"已取消订阅 | {coin} | {interval}")
+        except Exception as e:
+            logger.error(f"取消订阅失败 | {coin} | {interval} | {e}")
     
     def _handle_candle(self, cache_key: tuple[str, str], data: dict):
         """处理接收到的 K 线数据"""
@@ -307,8 +352,11 @@ class WebSocketClient:
                         # 添加新 K 线
                         cache.append(candle)
             
+            # 获取回调列表快照（线程安全）
+            with self._callbacks_lock:
+                callbacks = list(self._callbacks.get(cache_key, []))
+            
             # 触发回调（确保每个回调的异常都被捕获，不会影响其他回调）
-            callbacks = self._callbacks.get(cache_key, [])
             callback_errors = []
             for cb in callbacks:
                 try:
@@ -477,18 +525,28 @@ class WebSocketClient:
             return len(cache) >= required_bars
     
     def get_subscription_status(self) -> dict:
-        """获取订阅状态"""
-        return {
-            "running": self._running,
-            "subscriptions": list(self.subscriptions),
-            "cache_sizes": {
+        """获取订阅状态（线程安全）"""
+        with self._state_lock:
+            running = self._running
+        
+        with self._subscriptions_lock:
+            subscriptions = list(self.subscriptions)
+        
+        with self._cache_lock:
+            cache_sizes = {
                 f"{coin}_{interval}": len(cache)
                 for (coin, interval), cache in self.data_cache.items()
             }
+        
+        return {
+            "running": running,
+            "subscriptions": subscriptions,
+            "cache_sizes": cache_sizes
         }
     
     @property
     def is_running(self) -> bool:
-        """WebSocket 是否正在运行"""
-        return self._running
+        """WebSocket 是否正在运行（线程安全）"""
+        with self._state_lock:
+            return self._running
 

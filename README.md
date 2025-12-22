@@ -22,7 +22,6 @@
 ## 📂 项目结构
 
 ```text
-<your-package>/
 ├── __init__.py          # 模块导出与路径修复
 ├── pyproject.toml       # 项目元数据与依赖管理 (uv)
 ├── uv.lock              # 依赖锁定文件
@@ -56,25 +55,23 @@ uv sync
 
 由于项目采用包结构，请在仓库父目录运行或设置 `PYTHONPATH`。
 
-> **注意**：下文命令中的 `<pkg>` 需替换为实际的包目录名（如项目目录名）。
-
 **常用命令：**
 
 ```bash
 # 全量分析：检查所有 USDC 永续合约
-python -m <pkg>.main --mode=analysis
+python -m main --mode=analysis
 
 # 持续监控：每小时自动运行一次，发现异常即告警
-python -m <pkg>.main --mode=monitor --interval=3600
+python -m main --mode=monitor --interval=3600
 
 # 指定币种：仅分析特定交易对
-python -m <pkg>.main --coin=ETH/USDC:USDC
+python -m main --coin=ETH/USDC:USDC
 
 # 指定交易所：使用其他 ccxt 支持的交易所
-python -m <pkg>.main --exchange=binance
+python -m main --exchange=binance
 
 # 调试模式：开启 DEBUG 日志
-python -m <pkg>.main --debug
+python -m main --debug
 ```
 
 ### 3. 命令行参数

@@ -184,7 +184,8 @@ class DelayCorrelationAnalyzer:
                 continue
             
             if lag > 0:
-                # ALT 滞后 BTC: 比较 BTC[t] 与 ALT[t+lag]
+                # ALT 滞后 BTC: 比较 BTC[0:len-lag] 与 ALT[lag:len]
+                # 即比较 BTC[t] 与 ALT[t+lag]，其中 t 从 0 到 len-lag-1
                 # 确保切片后的长度一致
                 x = btc_ret[:-lag]
                 y = alt_ret[lag:]

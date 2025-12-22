@@ -433,6 +433,13 @@ class WebSocketClient:
             return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
         
         df = pd.DataFrame(data)
+        
+        # 检测时间戳单位：如果时间戳小于 2e10（约2033年），可能是秒，需要转换为毫秒
+        # 否则假设已经是毫秒
+        if len(df) > 0 and df["timestamp"].iloc[0] < 2e10:
+            # 时间戳是秒，转换为毫秒
+            df["timestamp"] = df["timestamp"] * 1000
+        
         df["Timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True).dt.tz_convert(None)
         df = df.rename(columns={
             "open": "Open",

@@ -195,8 +195,8 @@ class RESTClient:
         # 检查是否需要下载更早的数据
         if oldest_cached > since_ms:
             # 需要下载更早的历史数据
-            # 使用 oldest_cached - ms_per_bar 确保时间戳对齐到 K 线边界
-            until_ms = oldest_cached - ms_per_bar
+            # 使用 oldest_cached 作为边界，确保包含 oldest_cached 本身，避免数据缺失
+            until_ms = oldest_cached
             logger.debug(f"下载历史数据 | {symbol} | {timeframe} | "
                         f"从 {since_ms} 到 {until_ms}")
             historical_df = self._download_range(symbol, timeframe, since_ms, until_ms)
@@ -204,7 +204,7 @@ class RESTClient:
                 self.cache.save_ohlcv(symbol, timeframe, historical_df)
         
         # 检查是否需要下载更新的数据
-        if latest_cached < now_ms - ms_per_bar * 2:  # 允许 2 根 K 线的延迟
+        if latest_cached <= now_ms - ms_per_bar * 2:  # 允许 2 根 K 线的延迟
             # 需要下载最新数据
             new_since = latest_cached + 1
             logger.debug(f"增量更新 | {symbol} | {timeframe} | 从 {latest_cached}")
@@ -330,7 +330,9 @@ class RESTClient:
                     continue
             all_rows.extend(filtered)
             
-            if len(ohlcv) < 1500 or new_timestamp >= until_ms:
+            # 当获取的数据少于限制或时间戳超过边界时停止
+            # 注意：使用 > 而不是 >=，确保当 new_timestamp == until_ms 时已包含边界数据
+            if len(ohlcv) < 1500 or new_timestamp > until_ms:
                 break
             
             current_since = new_timestamp + 1

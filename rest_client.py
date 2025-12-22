@@ -65,7 +65,7 @@ class RESTClient:
             'M': 30 * 24 * 60,
         }
         
-        unit = timeframe[-1].lower()
+        unit = timeframe[-1]  # 不转小写，保留大写 M 以正确匹配月份
         if unit not in unit_multipliers:
             raise ValueError(f"不支持的 timeframe 格式: {timeframe}")
         

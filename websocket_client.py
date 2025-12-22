@@ -9,6 +9,7 @@ import logging
 import asyncio
 import atexit
 import weakref
+import threading
 from collections import deque
 from functools import partial
 from typing import Optional, Callable
@@ -64,6 +65,7 @@ class WebSocketClient:
         
         # 数据缓存: {(coin, interval): deque([candle_data, ...])}
         self.data_cache: dict[tuple[str, str], deque] = {}
+        self._cache_lock = threading.Lock()  # 保护 data_cache 的线程锁
         
         # 订阅状态
         self.subscriptions: set[tuple[str, str]] = set()
@@ -228,9 +230,10 @@ class WebSocketClient:
         
         cache_key = (coin, interval)
         
-        # 初始化缓存
-        if cache_key not in self.data_cache:
-            self.data_cache[cache_key] = deque(maxlen=self.max_cache_size)
+        # 初始化缓存（线程安全）
+        with self._cache_lock:
+            if cache_key not in self.data_cache:
+                self.data_cache[cache_key] = deque(maxlen=self.max_cache_size)
         
         # 注册回调（去重检查）
         if callback:
@@ -292,16 +295,17 @@ class WebSocketClient:
             if candle is None:
                 return
             
-            # 更新缓存
-            cache = self.data_cache.get(cache_key)
-            if cache is not None:
-                # 检查是否是更新现有 K 线还是新 K 线
-                if cache and cache[-1]["timestamp"] == candle["timestamp"]:
-                    # 更新最后一根 K 线
-                    cache[-1] = candle
-                else:
-                    # 添加新 K 线
-                    cache.append(candle)
+            # 更新缓存（线程安全）
+            with self._cache_lock:
+                cache = self.data_cache.get(cache_key)
+                if cache is not None:
+                    # 检查是否是更新现有 K 线还是新 K 线
+                    if cache and cache[-1]["timestamp"] == candle["timestamp"]:
+                        # 更新最后一根 K 线
+                        cache[-1] = candle
+                    else:
+                        # 添加新 K 线
+                        cache.append(candle)
             
             # 触发回调（确保每个回调的异常都被捕获，不会影响其他回调）
             callbacks = self._callbacks.get(cache_key, [])
@@ -391,12 +395,16 @@ class WebSocketClient:
             K 线数据列表
         """
         cache_key = (coin, interval)
-        cache = self.data_cache.get(cache_key)
         
-        if cache is None:
-            return []
+        # 线程安全读取缓存
+        with self._cache_lock:
+            cache = self.data_cache.get(cache_key)
+            
+            if cache is None:
+                return []
+            
+            data = list(cache)
         
-        data = list(cache)
         if count is not None:
             data = data[-count:]
         
@@ -451,12 +459,15 @@ class WebSocketClient:
             是否有足够数据
         """
         cache_key = (coin, interval)
-        cache = self.data_cache.get(cache_key)
         
-        if cache is None:
-            return False
-        
-        return len(cache) >= required_bars
+        # 线程安全读取缓存
+        with self._cache_lock:
+            cache = self.data_cache.get(cache_key)
+            
+            if cache is None:
+                return False
+            
+            return len(cache) >= required_bars
     
     def get_subscription_status(self) -> dict:
         """获取订阅状态"""

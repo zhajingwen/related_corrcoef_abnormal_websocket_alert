@@ -42,13 +42,21 @@ def sender(msg, url=None, title='', del_blank_row=True):
             msg_row = []
             for i_word in i_list:
                 if '&url&' in i_word:
-                    href =  i_word.split('&url&')[-1].strip()
-                    link_name = i_word.split('&url&')[0].strip()
-                    item_json = {
-                        "tag": "a",
-                        "href": href,
-                        "text": link_name
-                    }
+                    # 限制每个词只能有一个 &url& 标记，避免解析歧义
+                    url_count = i_word.count('&url&')
+                    if url_count > 1:
+                        logger.warning(f"词中包含多个 &url& 标记，将作为普通文本处理: {i_word}")
+                        item_json = {
+                            "tag": "text",
+                            "text": i_word + ' '
+                        }
+                    else:
+                        link_name, href = i_word.split('&url&', 1)  # 只分割一次
+                        item_json = {
+                            "tag": "a",
+                            "href": href.strip(),
+                            "text": link_name.strip()
+                        }
                 else:
                     item_json = {
                         "tag": "text",

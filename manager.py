@@ -11,8 +11,8 @@ from collections import OrderedDict
 from typing import Optional
 import pandas as pd
 
-from .sqlite_cache import SQLiteCache
-from .rest_client import RESTClient
+from sqlite_cache import SQLiteCache
+from rest_client import RESTClient
 
 logger = logging.getLogger(__name__)
 

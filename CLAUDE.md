@@ -16,16 +16,16 @@ uv sync
 ### 运行程序
 ```bash
 # 分析模式（一次性分析所有币种）
-python -m qff.main --mode=analysis
+uv run python main.py --mode=analysis
 
 # 监控模式（持续监控）
-python -m qff.main --mode=monitor --interval=3600
+uv run python main.py --mode=monitor --interval=3600
 
 # 分析单个币种（用于测试）
-python -m qff.main --coin=ETH/USDC:USDC
+uv run python main.py --coin=ETH/USDC:USDC
 
 # 调试模式
-python -m qff.main --debug
+uv run python main.py --debug
 ```
 
 ### 环境变量配置

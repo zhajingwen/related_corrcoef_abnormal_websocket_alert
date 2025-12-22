@@ -16,7 +16,7 @@
 uv sync
 
 # 2. 运行全量分析
-python -m qff.main --mode=analysis
+uv run python main.py --mode=analysis
 
 # 3. （可选）配置飞书告警
 export LARKBOT_ID=your_bot_id
@@ -55,7 +55,7 @@ Hyperliquid 相关系数分析器
 ## 📂 项目结构
 
 ```text
-qff/
+related_corrcoef_abnormal_websocket_alert/
 ├── __init__.py          # 模块导出
 ├── pyproject.toml       # 项目元数据与依赖管理 (uv)
 ├── uv.lock              # 依赖锁定文件
@@ -84,7 +84,7 @@ qff/
 ```bash
 # 克隆项目
 git clone <repo_url>
-cd qff
+cd related_corrcoef_abnormal_websocket_alert
 
 # 安装依赖
 uv sync
@@ -100,25 +100,23 @@ uv sync
 
 ### 2. 运行分析
 
-项目采用包结构，需要使用 `python -m qff.main` 方式运行。
-
 **常用命令：**
 
 ```bash
 # 全量分析：检查所有 USDC 永续合约
-python -m qff.main --mode=analysis
+uv run python main.py --mode=analysis
 
 # 持续监控：每小时自动运行一次，发现异常即告警
-python -m qff.main --mode=monitor --interval=3600
+uv run python main.py --mode=monitor --interval=3600
 
 # 指定币种：仅分析特定交易对（适合测试）
-python -m qff.main --coin=ETH/USDC:USDC
+uv run python main.py --coin=ETH/USDC:USDC
 
 # 指定交易所：使用其他 ccxt 支持的交易所
-python -m qff.main --exchange=binance
+uv run python main.py --exchange=binance
 
 # 调试模式：开启 DEBUG 日志，查看详细执行过程
-python -m qff.main --debug
+uv run python main.py --debug
 ```
 
 ### 3. 命令行参数

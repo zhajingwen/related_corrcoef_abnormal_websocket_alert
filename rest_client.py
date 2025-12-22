@@ -12,7 +12,7 @@ import ccxt
 import pandas as pd
 from retry import retry
 
-from .sqlite_cache import SQLiteCache
+from sqlite_cache import SQLiteCache
 
 logger = logging.getLogger(__name__)
 

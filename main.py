@@ -18,7 +18,7 @@ import time
 import signal
 import threading
 
-from .analyzer import DelayCorrelationAnalyzer, setup_logging
+from analyzer import DelayCorrelationAnalyzer, setup_logging
 
 logger = setup_logging()
 

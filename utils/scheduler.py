@@ -1,7 +1,7 @@
 import time
 import logging
 from datetime import datetime, timedelta
-from .config import env
+from utils.config import env
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('Timer Scheduler')

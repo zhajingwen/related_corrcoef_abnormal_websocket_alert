@@ -1,8 +1,8 @@
 import traceback
 import os
 import logging
-from .lark_bot import sender
-# from .config import env
+from utils.lark_bot import sender
+# from utils.config import env
 
 logger = logging.getLogger(__name__)
 

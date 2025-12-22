@@ -32,3 +32,8 @@ Thumbs.db
 # Project specific
 alerts/
 *.log
+
+# Environment variables
+.env
+.env.local
+.env.*.local

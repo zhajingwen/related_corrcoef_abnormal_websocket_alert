@@ -9,6 +9,7 @@ import time
 import os
 import logging
 import warnings
+import threading
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 import numpy as np
@@ -123,18 +124,22 @@ class DelayCorrelationAnalyzer:
             elif not lark_bot_id:
                 logger.warning("环境变量 LARKBOT_ID 未设置，飞书通知功能不可用")
         
+        # 初始化锁（防止多线程环境下的竞态条件）
+        self._init_lock = threading.Lock()
+
         logger.info(
             f"分析器初始化 | 交易所: {exchange_name} | "
             f"时间周期: {self.timeframes} | 数据周期: {self.periods}"
         )
-    
+
     def initialize(self):
-        """初始化：启动数据管理器"""
-        self.data_manager.initialize()
-        
-        # 预取 BTC 数据
-        logger.info("预取 BTC 历史数据...")
-        self.data_manager.prefetch_btc_data(self.timeframes, self.periods)
+        """初始化：启动数据管理器（线程安全）"""
+        with self._init_lock:
+            self.data_manager.initialize()
+
+            # 预取 BTC 数据
+            logger.info("预取 BTC 历史数据...")
+            self.data_manager.prefetch_btc_data(self.timeframes, self.periods)
     
     def shutdown(self):
         """关闭：停止数据管理器"""

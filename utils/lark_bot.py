@@ -12,6 +12,30 @@ MAX_RETRIES = 3
 RETRY_DELAY = 1  # 秒
 REQUEST_TIMEOUT = 10  # 秒
 
+# Webhook ID 最小长度（飞书 webhook ID 通常为 36 字符的 UUID 格式）
+MIN_WEBHOOK_ID_LENGTH = 20
+
+
+def _validate_webhook_id(webhook_id: str) -> bool:
+    """
+    验证飞书 webhook ID 格式
+
+    Args:
+        webhook_id: webhook ID 字符串
+
+    Returns:
+        是否有效
+    """
+    if not webhook_id:
+        return False
+    if len(webhook_id) < MIN_WEBHOOK_ID_LENGTH:
+        return False
+    # 简单检查：只允许字母、数字和连字符
+    if not all(c.isalnum() or c == '-' for c in webhook_id):
+        return False
+    return True
+
+
 def sender(msg, url=None, title='', del_blank_row=True):
     """
     # 文本格式化官方文档
@@ -29,6 +53,9 @@ def sender(msg, url=None, title='', del_blank_row=True):
         default_webhook_id = os.getenv('LARKBOT_ID')
         if not default_webhook_id:
             logger.error("未提供 url 且环境变量 LARKBOT_ID 未设置")
+            return None
+        if not _validate_webhook_id(default_webhook_id):
+            logger.error(f"Webhook ID 格式无效（长度应 >= {MIN_WEBHOOK_ID_LENGTH}，只允许字母数字和连字符）")
             return None
         url = f'https://open.feishu.cn/open-apis/bot/v2/hook/{default_webhook_id}'
     msg_list = []

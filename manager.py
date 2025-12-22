@@ -29,6 +29,8 @@ class DataManager:
     
     # BTC 内存缓存最大条目数
     MAX_BTC_CACHE_SIZE = 100
+    # 下载锁最大数量（防止内存泄漏）
+    MAX_DOWNLOAD_LOCKS = 200
     
     def __init__(
         self,
@@ -94,15 +96,29 @@ class DataManager:
     def _get_download_lock(self, cache_key: tuple[str, str]) -> threading.Lock:
         """
         获取或创建指定缓存键的下载锁
-        
+
         Args:
             cache_key: 缓存键 (timeframe, period)
-        
+
         Returns:
             该缓存键对应的下载锁
         """
         with self._download_locks_lock:
             if cache_key not in self._download_locks:
+                # 清理过期的锁（防止内存泄漏）
+                if len(self._download_locks) >= self.MAX_DOWNLOAD_LOCKS:
+                    # 移除一半的旧锁（只移除未被持有的锁）
+                    keys_to_remove = []
+                    for key, lock in list(self._download_locks.items()):
+                        if not lock.locked():
+                            keys_to_remove.append(key)
+                            if len(keys_to_remove) >= self.MAX_DOWNLOAD_LOCKS // 2:
+                                break
+                    for key in keys_to_remove:
+                        del self._download_locks[key]
+                    if keys_to_remove:
+                        logger.debug(f"清理了 {len(keys_to_remove)} 个过期的下载锁")
+
                 self._download_locks[cache_key] = threading.Lock()
             return self._download_locks[cache_key]
     
@@ -130,7 +146,7 @@ class DataManager:
                 # 移到末尾（标记为最近使用）
                 self._btc_cache.move_to_end(cache_key)
                 logger.debug(f"BTC 数据缓存命中 | {timeframe}/{period}")
-                return self._btc_cache[cache_key].copy()
+                return self._btc_cache[cache_key].copy(deep=True)
         
         # 缓存未命中，获取该键的下载锁
         download_lock = self._get_download_lock(cache_key)
@@ -142,7 +158,7 @@ class DataManager:
                     # 其他线程已经下载了，直接返回缓存的数据
                     self._btc_cache.move_to_end(cache_key)
                     logger.debug(f"BTC 数据已被其他线程缓存 | {timeframe}/{period}")
-                    return self._btc_cache[cache_key].copy()
+                    return self._btc_cache[cache_key].copy(deep=True)
                 else:
                     # 记录缓存未命中
                     with self._cache_stats_lock:
@@ -161,8 +177,8 @@ class DataManager:
                             oldest_key = next(iter(self._btc_cache))
                             self._btc_cache.pop(oldest_key)
                             logger.debug(f"BTC 缓存已满，移除最旧条目 | {oldest_key}")
-                    
-                    return df.copy()
+
+                    return df.copy(deep=True)
             except Exception as e:
                 logger.error(f"获取 BTC 数据失败 | {timeframe}/{period} | {e}")
         

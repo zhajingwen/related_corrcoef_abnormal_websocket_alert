@@ -140,7 +140,8 @@ def redis_cli() -> redis.Redis:
         
         _last_connection_attempt = now
         
-        logger.debug(f'Redis 连接配置: host={redis_host}, password={"***" if redis_password else "未设置"}')
+        # 注意：不记录具体的 host 信息以避免敏感信息泄露
+        logger.debug(f'Redis 连接中... (密码: {"已配置" if redis_password else "未设置"})')
         
         # 尝试连接（带重试）
         client = _try_connect()

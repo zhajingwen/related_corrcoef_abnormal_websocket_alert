@@ -140,29 +140,44 @@ class SQLiteCache:
     
     def close_all(self):
         """关闭所有线程的数据库连接"""
-        # 首先关闭所有已跟踪的连接
-        with self._connections_lock:
-            connections_to_close = list(self._connections)
-            self._connections.clear()
-        
-        # 关闭所有连接
+        connections_to_close = []
+        closed_count = 0
+        error_count = 0
+
+        # 首先获取所有需要关闭的连接（使用 try-finally 确保列表被清理）
+        try:
+            with self._connections_lock:
+                connections_to_close = list(self._connections)
+        finally:
+            # 无论是否成功获取连接列表，都清理跟踪列表
+            with self._connections_lock:
+                self._connections.clear()
+
+        # 关闭所有连接（每个连接独立处理，确保一个失败不影响其他）
         for conn in connections_to_close:
             try:
                 conn.close()
+                closed_count += 1
             except Exception as e:
+                error_count += 1
                 logger.debug(f"关闭连接时出错（可忽略）: {e}")
-        
+
         # 清理当前线程的连接引用
         if hasattr(self._local, 'conn'):
             try:
                 if self._local.conn is not None:
                     self._local.conn.close()
+                    closed_count += 1
             except Exception as e:
+                error_count += 1
                 logger.debug(f"关闭当前线程连接时出错（可忽略）: {e}")
             finally:
                 self._local.conn = None
-        
-        logger.debug("所有数据库连接已关闭")
+
+        if error_count > 0:
+            logger.debug(f"数据库连接关闭完成 | 成功: {closed_count} | 失败: {error_count}")
+        else:
+            logger.debug("所有数据库连接已关闭")
     
     def __del__(self):
         """析构函数：确保所有连接被关闭"""

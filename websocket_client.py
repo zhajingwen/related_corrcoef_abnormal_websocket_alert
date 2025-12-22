@@ -141,63 +141,82 @@ class WebSocketClient:
     def _close_info_connection(info: Info):
         """
         尝试关闭 Info 对象的 WebSocket 连接
-        
+
         hyperliquid SDK 的 Info 对象可能有多种关闭方式，
         此方法尝试所有可能的方式以确保连接被正确关闭。
         """
         close_attempts = []
-        
+        closed = False
+
         # 方法1: 直接调用 close 方法
         if hasattr(info, 'close'):
             try:
                 info.close()
                 logger.debug("WebSocket 连接已通过 close() 方法关闭")
-                return
+                closed = True
             except Exception as e:
                 close_attempts.append(f"close(): {type(e).__name__}: {e}")
-        
+
         # 方法2: 调用 disconnect 方法
-        if hasattr(info, 'disconnect'):
+        if not closed and hasattr(info, 'disconnect'):
             try:
                 info.disconnect()
                 logger.debug("WebSocket 连接已通过 disconnect() 方法关闭")
-                return
+                closed = True
             except Exception as e:
                 close_attempts.append(f"disconnect(): {type(e).__name__}: {e}")
-        
-        # 方法3: 关闭内部 ws 对象
+
+        # 方法3: 关闭内部 ws 对象（即使已关闭也尝试，确保彻底清理）
         if hasattr(info, 'ws') and info.ws:
             try:
                 if hasattr(info.ws, 'close'):
                     info.ws.close()
                     logger.debug("WebSocket 连接已通过 ws.close() 方法关闭")
+                    closed = True
             except Exception as e:
                 close_attempts.append(f"ws.close(): {type(e).__name__}: {e}")
-        
+
         # 方法4: 关闭 websocket manager
         if hasattr(info, 'ws_manager') and info.ws_manager:
             try:
                 if hasattr(info.ws_manager, 'close'):
                     info.ws_manager.close()
                     logger.debug("WebSocket 连接已通过 ws_manager.close() 方法关闭")
+                    closed = True
                 elif hasattr(info.ws_manager, 'stop'):
                     info.ws_manager.stop()
                     logger.debug("WebSocket 连接已通过 ws_manager.stop() 方法关闭")
+                    closed = True
             except Exception as e:
                 close_attempts.append(f"ws_manager: {type(e).__name__}: {e}")
-        
+
         # 方法5: 尝试关闭内部线程（如果存在）
         if hasattr(info, '_thread') and info._thread:
             try:
                 if hasattr(info._thread, 'join'):
-                    info._thread.join(timeout=1.0)  # 等待最多1秒
-                    logger.debug("WebSocket 内部线程已停止")
+                    info._thread.join(timeout=2.0)  # 等待最多2秒
+                    if info._thread.is_alive():
+                        logger.warning("WebSocket 内部线程未能在超时内停止")
+                    else:
+                        logger.debug("WebSocket 内部线程已停止")
             except Exception as e:
                 close_attempts.append(f"_thread.join(): {type(e).__name__}: {e}")
-        
-        # 如果所有方法都失败，记录详细的失败信息
+
+        # 方法6: 清理可能存在的事件循环资源
+        if hasattr(info, '_loop') and info._loop:
+            try:
+                if not info._loop.is_closed():
+                    info._loop.call_soon_threadsafe(info._loop.stop)
+                    logger.debug("WebSocket 事件循环已请求停止")
+            except Exception as e:
+                close_attempts.append(f"_loop.stop(): {type(e).__name__}: {e}")
+
+        # 记录关闭状态
         if close_attempts:
-            logger.warning(f"WebSocket 关闭尝试遇到错误: {'; '.join(close_attempts)}")
+            if closed:
+                logger.debug(f"WebSocket 已关闭，但部分清理操作遇到错误: {'; '.join(close_attempts)}")
+            else:
+                logger.warning(f"WebSocket 关闭尝试遇到错误: {'; '.join(close_attempts)}")
     
     def __del__(self):
         """析构函数：确保资源被释放"""
@@ -481,10 +500,13 @@ class WebSocketClient:
             return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
         
         df = pd.DataFrame(data)
-        
-        # 检测时间戳单位：如果时间戳小于 2e10（约2033年），可能是秒，需要转换为毫秒
-        # 否则假设已经是毫秒
-        if len(df) > 0 and df["timestamp"].iloc[0] < 2e10:
+
+        # 检测时间戳单位：使用更可靠的阈值判断
+        # 毫秒时间戳从 1970-01-01 到现在约为 1.7e12 (2023年约为 1.7e12)
+        # 秒时间戳从 1970-01-01 到现在约为 1.7e9
+        # 阈值设为 1e11，可以可靠区分秒和毫秒直到 5138 年
+        TIMESTAMP_UNIT_THRESHOLD = 1e11  # 大于此值为毫秒，小于此值为秒
+        if len(df) > 0 and df["timestamp"].iloc[0] < TIMESTAMP_UNIT_THRESHOLD:
             # 时间戳是秒，转换为毫秒
             df["timestamp"] = df["timestamp"] * 1000
         

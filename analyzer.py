@@ -37,7 +37,7 @@ def setup_logging(log_file: str = "analyzer.log", level: int = logging.INFO) -> 
     Returns:
         配置好的 logger 实例
     """
-    log = logging.getLogger("data.analyzer")
+    log = logging.getLogger(__name__)
     
     # 避免重复添加 handlers
     if log.handlers:

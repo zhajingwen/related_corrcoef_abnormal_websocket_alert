@@ -6,9 +6,9 @@
 - monitor: 持续监控实时数据
 
 使用方式：
-    python -m data.main --mode=analysis
-    python -m data.main --mode=monitor
-    python -m data.main --coin=ETH/USDC:USDC  # 分析单个币种
+    python main.py --mode=analysis
+    python main.py --mode=monitor
+    python main.py --coin=ETH/USDC:USDC  # 分析单个币种
 """
 
 import argparse
@@ -30,9 +30,9 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  python -m data.main --mode=analysis              # 一次性分析所有币种
-  python -m data.main --coin=ETH/USDC:USDC         # 分析单个币种
-  python -m data.main --mode=monitor               # 持续监控模式
+  python main.py --mode=analysis              # 一次性分析所有币种
+  python main.py --coin=ETH/USDC:USDC         # 分析单个币种
+  python main.py --mode=monitor               # 持续监控模式
         """
     )
     

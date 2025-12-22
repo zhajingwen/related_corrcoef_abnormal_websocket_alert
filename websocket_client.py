@@ -95,6 +95,14 @@ class WebSocketClient:
         if not self._running:
             return
         
+        # 1. 先取消所有活跃订阅，确保服务器端连接清理
+        active_subs = list(self.subscriptions)
+        for coin, interval in active_subs:
+            try:
+                self.unsubscribe_candles(coin, interval)
+            except Exception as e:
+                logger.debug(f"停止时取消订阅失败 (正常现象) | {coin} | {interval} | {e}")
+        
         self._running = False
         self.subscriptions.clear()
         self._callbacks.clear()  # 清理所有回调函数，避免内存泄漏

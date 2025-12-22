@@ -62,6 +62,7 @@ class RESTClient:
             'h': 60,
             'd': 24 * 60,
             'w': 7 * 24 * 60,
+            'M': 30 * 24 * 60,
         }
         
         unit = timeframe[-1].lower()
@@ -155,7 +156,7 @@ class RESTClient:
             cached_df = self._get_with_incremental_update(
                 symbol, timeframe, since_ms, now_ms, ms_per_bar, target_bars
             )
-            if cached_df is not None and len(cached_df) >= target_bars * 0.9:  # 允许 10% 的误差
+            if cached_df is not None and len(cached_df) >= target_bars * 0.99:  # 允许 1% 的误差
                 return self._process_dataframe(cached_df)
         
         # 全量下载

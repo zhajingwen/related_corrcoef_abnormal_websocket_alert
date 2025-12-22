@@ -245,11 +245,6 @@ class DelayCorrelationAnalyzer:
         btc_df_aligned = btc_df.loc[common_idx].copy()
         alt_df_aligned = alt_df.loc[common_idx].copy()
         
-        # 重新计算 return 列，因为对齐后原始的 pct_change() 值可能不正确
-        # （原始 return 是基于连续时间点计算的，对齐可能删除了中间时间点）
-        btc_df_aligned['return'] = btc_df_aligned['Close'].pct_change().fillna(0)
-        alt_df_aligned['return'] = alt_df_aligned['Close'].pct_change().fillna(0)
-        
         # 数据验证：检查数据量
         if len(btc_df_aligned) < self.MIN_DATA_POINTS_FOR_ANALYSIS:
             logger.warning(f"数据量不足，跳过 | 币种: {coin} | {timeframe}/{period}")

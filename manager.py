@@ -60,8 +60,8 @@ class DataManager:
         logger.info(f"数据管理器初始化 | 交易所: {exchange_name} | 数据库: {db_path}")
     
     def initialize(self):
-        """初始化（保留接口兼容性）"""
-        pass
+        """初始化（清除 BTC 内存缓存，确保数据新鲜）"""
+        self.clear_btc_cache()
     
     def shutdown(self):
         """关闭（保留接口兼容性）"""

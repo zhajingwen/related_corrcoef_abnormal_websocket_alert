@@ -37,3 +37,4 @@ alerts/
 .env
 .env.local
 .env.*.local
+CLAUDE.md

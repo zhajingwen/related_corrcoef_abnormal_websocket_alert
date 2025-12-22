@@ -98,19 +98,30 @@ class SQLiteCache:
             self._local.conn = conn
             # 跟踪连接以便后续关闭
             with self._connections_lock:
-                self._connections.append(conn)
+                # 检查连接是否已经在列表中（避免重复添加）
+                if conn not in self._connections:
+                    self._connections.append(conn)
         
+        conn_to_use = self._local.conn
         try:
-            yield self._local.conn
+            yield conn_to_use
         except sqlite3.Error as e:
             # 发生错误时回滚事务
-            if self._local.conn:
+            if conn_to_use:
                 try:
-                    self._local.conn.rollback()
+                    conn_to_use.rollback()
                 except Exception as rollback_err:
                     # 连接已损坏，标记为需要重建
                     logger.warning(f"连接回滚失败，将在下次访问时重建连接: {rollback_err}")
+                    # 从跟踪列表中移除损坏的连接
+                    with self._connections_lock:
+                        if conn_to_use in self._connections:
+                            self._connections.remove(conn_to_use)
                     self._local.conn = None
+            raise
+        except Exception as e:
+            # 捕获其他异常，确保连接状态正确
+            logger.warning(f"数据库操作异常: {e}")
             raise
     
     def close(self):
@@ -129,16 +140,28 @@ class SQLiteCache:
     
     def close_all(self):
         """关闭所有线程的数据库连接"""
+        # 首先关闭所有已跟踪的连接
         with self._connections_lock:
-            for conn in self._connections:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+            connections_to_close = list(self._connections)
             self._connections.clear()
+        
+        # 关闭所有连接
+        for conn in connections_to_close:
+            try:
+                conn.close()
+            except Exception as e:
+                logger.debug(f"关闭连接时出错（可忽略）: {e}")
+        
         # 清理当前线程的连接引用
         if hasattr(self._local, 'conn'):
-            self._local.conn = None
+            try:
+                if self._local.conn is not None:
+                    self._local.conn.close()
+            except Exception as e:
+                logger.debug(f"关闭当前线程连接时出错（可忽略）: {e}")
+            finally:
+                self._local.conn = None
+        
         logger.debug("所有数据库连接已关闭")
     
     def __del__(self):

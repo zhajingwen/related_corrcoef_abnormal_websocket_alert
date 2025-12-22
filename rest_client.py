@@ -309,7 +309,25 @@ class RESTClient:
             last_timestamp = new_timestamp
             
             # 过滤超出范围的数据（包括起始和结束边界）
-            filtered = [row for row in ohlcv if since_ms <= row[0] <= until_ms]
+            # 添加类型检查和异常处理，确保 row[0] 是有效的数字类型
+            filtered = []
+            for row in ohlcv:
+                try:
+                    # 检查 row 是否为列表/元组且长度足够
+                    if not isinstance(row, (list, tuple)) or len(row) < 1:
+                        logger.warning(f"无效的数据行格式: {row}")
+                        continue
+                    # 检查时间戳是否为数字类型
+                    timestamp = row[0]
+                    if not isinstance(timestamp, (int, float)):
+                        logger.warning(f"时间戳类型无效: {type(timestamp)}, 值: {timestamp}")
+                        continue
+                    # 检查时间戳是否在范围内
+                    if since_ms <= timestamp <= until_ms:
+                        filtered.append(row)
+                except (IndexError, TypeError) as e:
+                    logger.warning(f"处理数据行时出错: {e}, 行: {row}")
+                    continue
             all_rows.extend(filtered)
             
             if len(ohlcv) < 1500 or new_timestamp >= until_ms:

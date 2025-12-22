@@ -158,7 +158,21 @@ class DelayCorrelationAnalyzer:
         """
         corrs = []
         lags = list(range(0, max_lag + 1))
-        arr_len = len(btc_ret)
+        btc_len = len(btc_ret)
+        alt_len = len(alt_ret)
+        
+        # 检查数据长度是否一致，如果不一致则记录警告并使用最小长度
+        if btc_len != alt_len:
+            logger.warning(
+                f"数据长度不一致: BTC={btc_len}, ALT={alt_len}, "
+                f"将使用最小长度 {min(btc_len, alt_len)} 进行计算"
+            )
+            min_len = min(btc_len, alt_len)
+            btc_ret = btc_ret[:min_len]
+            alt_ret = alt_ret[:min_len]
+            arr_len = min_len
+        else:
+            arr_len = btc_len
         
         for lag in lags:
             # 检查 lag 是否会导致数据不足
@@ -171,12 +185,14 @@ class DelayCorrelationAnalyzer:
             
             if lag > 0:
                 # ALT 滞后 BTC: 比较 BTC[t] 与 ALT[t+lag]
+                # 确保切片后的长度一致
                 x = btc_ret[:-lag]
                 y = alt_ret[lag:]
             else:
                 x = btc_ret
                 y = alt_ret
             
+            # 再次检查对齐后的长度（虽然理论上应该一致，但为了安全）
             m = min(len(x), len(y))
             
             # 二次检查：确保对齐后的数据点足够
@@ -324,13 +340,23 @@ class DelayCorrelationAnalyzer:
         if not short_term_corrs or not long_term_corrs:
             return False, 0
         
-        min_short_corr = min(short_term_corrs)
-        max_long_corr = max(long_term_corrs)
+        # 过滤掉 NaN 值，避免 min/max 返回 NaN
+        short_term_corrs_valid = [c for c in short_term_corrs if not np.isnan(c)]
+        long_term_corrs_valid = [c for c in long_term_corrs if not np.isnan(c)]
+        
+        if not short_term_corrs_valid or not long_term_corrs_valid:
+            logger.debug("有效相关系数不足，无法进行异常检测")
+            return False, 0
+        
+        min_short_corr = min(short_term_corrs_valid)
+        max_long_corr = max(long_term_corrs_valid)
         
         logger.debug(f"相关系数检测 | 短期最小: {min_short_corr:.4f} | 长期最大: {max_long_corr:.4f}")
         
+        # 计算差值（无论是否满足阈值条件，都先计算，避免后续使用未定义变量）
+        diff_amount = max_long_corr - min_short_corr
+        
         if max_long_corr > self.LONG_TERM_CORR_THRESHOLD and min_short_corr < self.SHORT_TERM_CORR_THRESHOLD:
-            diff_amount = max_long_corr - min_short_corr
             if diff_amount > self.CORR_DIFF_THRESHOLD:
                 return True, diff_amount
             # 短期存在明显滞后时也触发

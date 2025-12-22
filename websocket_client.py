@@ -303,13 +303,24 @@ class WebSocketClient:
                     # 添加新 K 线
                     cache.append(candle)
             
-            # 触发回调
+            # 触发回调（确保每个回调的异常都被捕获，不会影响其他回调）
             callbacks = self._callbacks.get(cache_key, [])
+            callback_errors = []
             for cb in callbacks:
                 try:
                     cb(candle)
                 except Exception as e:
-                    logger.error(f"回调执行失败 | {cache_key} | {e}")
+                    # 记录错误但不中断其他回调的执行
+                    error_msg = f"回调执行失败 | {cache_key} | {type(e).__name__}: {e}"
+                    logger.error(error_msg, exc_info=True)
+                    callback_errors.append(error_msg)
+            
+            # 如果回调错误过多，记录警告（可选：可以添加告警机制）
+            if callback_errors and len(callback_errors) == len(callbacks):
+                logger.warning(
+                    f"所有回调都执行失败 | {cache_key} | "
+                    f"错误数: {len(callback_errors)}"
+                )
         
         except Exception as e:
             logger.error(f"处理 K 线数据失败 | {cache_key} | {e}")

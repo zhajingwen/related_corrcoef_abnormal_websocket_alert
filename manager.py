@@ -25,7 +25,7 @@ class DataManager:
     """
     
     # BTC 内存缓存最大条目数
-    MAX_BTC_CACHE_SIZE = 20
+    MAX_BTC_CACHE_SIZE = 100
     
     def __init__(
         self,
@@ -53,6 +53,9 @@ class DataManager:
         # BTC 数据缓存（使用 OrderedDict 实现 LRU 缓存，避免内存无限增长）
         self._btc_cache: OrderedDict[tuple[str, str], pd.DataFrame] = OrderedDict()
         self._btc_cache_lock = threading.Lock()  # 保护 BTC 缓存的线程锁
+        
+        # 缓存命中率统计
+        self._cache_stats = {'hits': 0, 'misses': 0}
         
         logger.info(f"数据管理器初始化 | 交易所: {exchange_name} | 数据库: {db_path}")
     
@@ -97,10 +100,15 @@ class DataManager:
         # 第一次检查（快速路径）
         with self._btc_cache_lock:
             if cache_key in self._btc_cache:
+                # 记录缓存命中
+                self._cache_stats['hits'] += 1
                 # 移到末尾（标记为最近使用）
                 self._btc_cache.move_to_end(cache_key)
                 logger.debug(f"BTC 数据缓存命中 | {timeframe}/{period}")
                 return self._btc_cache[cache_key].copy()
+            else:
+                # 记录缓存未命中
+                self._cache_stats['misses'] += 1
         
         # 缓存未命中，需要下载数据
         btc_symbol = "BTC/USDC:USDC"
@@ -148,9 +156,18 @@ class DataManager:
         """获取缓存统计信息（线程安全）"""
         with self._btc_cache_lock:
             btc_cache_keys = list(self._btc_cache.keys())
+            cache_stats = self._cache_stats.copy()
+            
+            # 计算命中率
+            total = cache_stats['hits'] + cache_stats['misses']
+            hit_rate = cache_stats['hits'] / total if total > 0 else 0.0
+            
         return {
             "sqlite": self.cache.get_cache_stats(),
-            "btc_memory_cache": btc_cache_keys
+            "btc_memory_cache": btc_cache_keys,
+            "btc_cache_hits": cache_stats['hits'],
+            "btc_cache_misses": cache_stats['misses'],
+            "btc_cache_hit_rate": f"{hit_rate:.2%}"
         }
     
     def prefetch_btc_data(self, timeframes: list[str], periods: list[str]):

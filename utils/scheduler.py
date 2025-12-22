@@ -97,9 +97,13 @@ def scheduled_task(start_time=None, duration=None, weekdays=None):
                         if current_weekday not in weekdays:
                             # 不是指定的周几，计算到下一个符合条件的周几需要等待的时间
                             days_until_next = _calculate_days_until_next_weekday(current_weekday, weekdays)
-                            wait_seconds = days_until_next * 24 * 60 * 60
-                            logger.info(f'当前是周{current_weekday+1}，不在调度计划 {weekdays} 中，等待 {days_until_next} 天后再次检查')
-                            time.sleep(wait_seconds)
+                            # 计算下一个目标周几的调度时间
+                            start_hour, start_minute = map(int, start_time.split(':'))
+                            next_target_date = today_now + timedelta(days=days_until_next)
+                            next_run_time = next_target_date.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
+                            wait_seconds = (next_run_time - today_now).total_seconds()
+                            logger.info(f'当前是周{current_weekday+1}，等待到 {next_run_time.strftime("%Y-%m-%d %H:%M")} (周{next_run_time.weekday()+1})')
+                            time.sleep(max(wait_seconds, 60))  # 至少等待60秒
                             continue
                         else:
                             logger.info(f'今天是周{current_weekday+1}，符合调度计划 {weekdays}')    

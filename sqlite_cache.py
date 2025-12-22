@@ -93,7 +93,7 @@ class SQLiteCache:
             conn = sqlite3.connect(
                 self.db_path,
                 check_same_thread=False,
-                timeout=30.0  # 增加超时时间，避免并发时锁等待超时
+                timeout=60.0  # 增加超时时间到60秒，避免并发时锁等待超时
             )
             self._local.conn = conn
             # 跟踪连接以便后续关闭
@@ -102,14 +102,15 @@ class SQLiteCache:
         
         try:
             yield self._local.conn
-        except sqlite3.Error:
+        except sqlite3.Error as e:
             # 发生错误时回滚事务
             if self._local.conn:
                 try:
                     self._local.conn.rollback()
-                except Exception:
-                    # 如果连接已损坏，rollback 可能失败，忽略该错误
-                    pass
+                except Exception as rollback_err:
+                    # 连接已损坏，标记为需要重建
+                    logger.warning(f"连接回滚失败，将在下次访问时重建连接: {rollback_err}")
+                    self._local.conn = None
             raise
     
     def close(self):

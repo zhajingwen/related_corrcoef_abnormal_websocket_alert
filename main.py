@@ -16,6 +16,7 @@ import logging
 import sys
 import time
 import signal
+import threading
 
 from .analyzer import DelayCorrelationAnalyzer, setup_logging
 
@@ -123,13 +124,12 @@ def run_monitor(args: argparse.Namespace):
     """运行持续监控模式"""
     analyzer = create_analyzer(args)
     
-    # 设置信号处理
-    running = True
+    # 使用 Event 替代布尔变量，确保线程安全
+    stop_event = threading.Event()
     
     def signal_handler(signum, frame):
-        nonlocal running
         logger.info("收到停止信号，正在退出...")
-        running = False
+        stop_event.set()
     
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -137,7 +137,7 @@ def run_monitor(args: argparse.Namespace):
     logger.info(f"启动监控模式 | 分析间隔: {args.interval}s")
     
     try:
-        while running:
+        while not stop_event.is_set():
             logger.info("开始新一轮分析...")
             
             try:
@@ -145,14 +145,17 @@ def run_monitor(args: argparse.Namespace):
             except Exception as e:
                 logger.error(f"分析过程出错: {e}")
             
-            if running:
+            if not stop_event.is_set():
                 logger.info(f"等待 {args.interval} 秒后进行下一轮分析...")
                 
-                # 分段等待，以便响应信号
-                wait_time = args.interval
-                while wait_time > 0 and running:
-                    time.sleep(min(wait_time, 10))
-                    wait_time -= 10
+                # 使用 wait() 替代 sleep，可以被中断
+                # 分段等待以便响应信号
+                remaining = args.interval
+                while remaining > 0 and not stop_event.is_set():
+                    wait_chunk = min(remaining, 10)
+                    if stop_event.wait(timeout=wait_chunk):
+                        break
+                    remaining -= wait_chunk
     
     except KeyboardInterrupt:
         logger.info("用户中断，正在退出...")

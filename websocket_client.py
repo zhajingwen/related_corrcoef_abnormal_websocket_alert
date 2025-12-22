@@ -10,6 +10,7 @@ import asyncio
 import atexit
 import weakref
 from collections import deque
+from functools import partial
 from typing import Optional, Callable
 from datetime import datetime
 import pandas as pd
@@ -121,47 +122,59 @@ class WebSocketClient:
         hyperliquid SDK 的 Info 对象可能有多种关闭方式，
         此方法尝试所有可能的方式以确保连接被正确关闭。
         """
+        close_attempts = []
+        
         # 方法1: 直接调用 close 方法
         if hasattr(info, 'close'):
             try:
                 info.close()
+                logger.debug("WebSocket 连接已通过 close() 方法关闭")
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                close_attempts.append(f"close(): {type(e).__name__}: {e}")
         
         # 方法2: 调用 disconnect 方法
         if hasattr(info, 'disconnect'):
             try:
                 info.disconnect()
+                logger.debug("WebSocket 连接已通过 disconnect() 方法关闭")
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                close_attempts.append(f"disconnect(): {type(e).__name__}: {e}")
         
         # 方法3: 关闭内部 ws 对象
         if hasattr(info, 'ws') and info.ws:
             try:
                 if hasattr(info.ws, 'close'):
                     info.ws.close()
-            except Exception:
-                pass
+                    logger.debug("WebSocket 连接已通过 ws.close() 方法关闭")
+            except Exception as e:
+                close_attempts.append(f"ws.close(): {type(e).__name__}: {e}")
         
         # 方法4: 关闭 websocket manager
         if hasattr(info, 'ws_manager') and info.ws_manager:
             try:
                 if hasattr(info.ws_manager, 'close'):
                     info.ws_manager.close()
+                    logger.debug("WebSocket 连接已通过 ws_manager.close() 方法关闭")
                 elif hasattr(info.ws_manager, 'stop'):
                     info.ws_manager.stop()
-            except Exception:
-                pass
+                    logger.debug("WebSocket 连接已通过 ws_manager.stop() 方法关闭")
+            except Exception as e:
+                close_attempts.append(f"ws_manager: {type(e).__name__}: {e}")
         
         # 方法5: 尝试关闭内部线程（如果存在）
         if hasattr(info, '_thread') and info._thread:
             try:
                 if hasattr(info._thread, 'join'):
                     info._thread.join(timeout=1.0)  # 等待最多1秒
-            except Exception:
-                pass
+                    logger.debug("WebSocket 内部线程已停止")
+            except Exception as e:
+                close_attempts.append(f"_thread.join(): {type(e).__name__}: {e}")
+        
+        # 如果所有方法都失败，记录详细的失败信息
+        if close_attempts:
+            logger.warning(f"WebSocket 关闭尝试遇到错误: {'; '.join(close_attempts)}")
     
     def __del__(self):
         """析构函数：确保资源被释放"""
@@ -229,7 +242,7 @@ class WebSocketClient:
                     "coin": coin,
                     "interval": interval
                 },
-                lambda data, ck=cache_key: self._handle_candle(ck, data)  # 使用默认参数绑定避免闭包后期绑定问题
+                partial(self._handle_candle, cache_key)
             )
             self.subscriptions.add(cache_key)
             logger.info(f"已订阅 K 线 | {coin} | {interval}")

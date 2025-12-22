@@ -6,6 +6,7 @@
 """
 
 import time
+import os
 import logging
 import warnings
 from logging.handlers import RotatingFileHandler
@@ -76,9 +77,9 @@ class DelayCorrelationAnalyzer:
     """
     
     # 相关系数计算所需的最小数据点数
-    MIN_POINTS_FOR_CORR_CALC = 10
+    MIN_POINTS_FOR_CORR_CALC = 30
     # 数据分析所需的最小数据点数
-    MIN_DATA_POINTS_FOR_ANALYSIS = 50
+    MIN_DATA_POINTS_FOR_ANALYSIS = 100
     
     # 异常模式检测阈值
     LONG_TERM_CORR_THRESHOLD = 0.6   # 长期相关系数阈值
@@ -258,6 +259,17 @@ class DelayCorrelationAnalyzer:
             logger.warning(f"数据量不足，跳过 | 币种: {coin} | {timeframe}/{period}")
             return None
         
+        # 数据验证：检查NaN值比例
+        btc_nan_ratio = btc_df_aligned['return'].isna().sum() / len(btc_df_aligned)
+        if btc_nan_ratio > 0.1:
+            logger.warning(f"BTC数据包含过多NaN值 ({btc_nan_ratio:.1%})，跳过 | 币种: {coin} | {timeframe}/{period}")
+            return None
+        
+        alt_nan_ratio = alt_df_aligned['return'].isna().sum() / len(alt_df_aligned)
+        if alt_nan_ratio > 0.1:
+            logger.warning(f"山寨币数据包含过多NaN值 ({alt_nan_ratio:.1%})，跳过 | 币种: {coin} | {timeframe}/{period}")
+            return None
+        
         return btc_df_aligned, alt_df_aligned
     
     def _analyze_single_combination(
@@ -349,13 +361,42 @@ class DelayCorrelationAnalyzer:
         logger.debug(f"详细分析结果:\n{df_results.to_string(index=False)}")
         
         # 发送飞书通知
+        alert_sent = False
         if self.lark_hook and HAS_LARK_BOT:
             try:
-                sender(content, self.lark_hook)
+                result = sender(content, self.lark_hook)
+                alert_sent = result is not None
+                if not alert_sent:
+                    logger.error(f"飞书通知发送失败（无返回结果）| 币种: {coin}")
             except Exception as e:
                 logger.error(f"飞书通知发送失败 | {e}")
         else:
             logger.warning(f"飞书通知未发送（未配置）| 币种: {coin}")
+        
+        # 如果告警未成功发送，保存到本地文件作为备份
+        if not alert_sent:
+            try:
+                # 创建告警目录
+                alert_dir = "alerts"
+                os.makedirs(alert_dir, exist_ok=True)
+                
+                # 生成文件名（包含币种和时间戳）
+                safe_coin = coin.replace('/', '_').replace(':', '_')
+                timestamp = int(time.time())
+                alert_file = os.path.join(alert_dir, f"alert_{safe_coin}_{timestamp}.txt")
+                
+                # 写入告警内容
+                with open(alert_file, 'w', encoding='utf-8') as f:
+                    f.write(f"告警时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"交易所: {self.exchange_name}\n")
+                    f.write(f"币种: {coin}\n")
+                    f.write(f"差值: {diff_amount:.2f}\n\n")
+                    f.write("详细分析结果:\n")
+                    f.write(df_results.to_string(index=False))
+                
+                logger.warning(f"告警已保存到本地文件: {alert_file}")
+            except Exception as e:
+                logger.error(f"保存告警到本地文件失败: {e}")
     
     def one_coin_analysis(self, coin: str) -> bool:
         """

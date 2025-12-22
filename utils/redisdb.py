@@ -60,11 +60,23 @@ def redis_cli() -> redis.Redis:
             logger.info("Redis 连接成功")
         except redis.AuthenticationError:
             logger.error("Redis 认证失败，请检查密码")
+            # 清理连接池资源
+            if _connection_pool:
+                try:
+                    _connection_pool.disconnect()
+                except Exception:
+                    pass
             _redis_client = None
             _connection_pool = None
             raise
         except redis.ConnectionError:
             logger.error("Redis 连接失败，请检查 Redis 是否运行")
+            # 清理连接池资源
+            if _connection_pool:
+                try:
+                    _connection_pool.disconnect()
+                except Exception:
+                    pass
             _redis_client = None
             _connection_pool = None
             raise

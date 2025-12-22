@@ -38,3 +38,6 @@ alerts/
 .env.local
 .env.*.local
 CLAUDE.md
+
+# Auto Claude data directory
+.auto-claude/

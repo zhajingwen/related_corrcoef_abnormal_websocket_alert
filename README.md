@@ -1,46 +1,175 @@
-# calculate-fake-te
+# Hyperliquid 相关系数异常监控与告警
 
 ![Python Version](https://img.shields.io/badge/python-3.12%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Code Style](https://img.shields.io/badge/code%20style-black-000000.svg)
 
-## 概述
+本项目用于分析 **Hyperliquid** 交易所中山寨币与 **BTC/USDC:USDC** 的相关性，识别“**短期低相关但长期高相关**”且可能存在**滞后关系（时间差）**的币种，并通过**飞书机器人**告警（未配置时会自动落盘到本地文件）。
 
-本模块是一个**相关系数分析器**，用于分析 Hyperliquid 交易所中山寨币与 BTC 的相关性，识别存在时间差套利机会的异常币种。
+## 核心特性
 
-**核心功能**：检测短期低相关但长期高相关的币种模式。这类币种与 BTC 在长期趋势上高度相关，但在短期内存在明显滞后，可能存在时间差套利机会。
+- **异常模式检测**：短期（默认 `1d`）低相关、长期（默认 `7d/30d/60d`）高相关，并满足差值阈值
+- **最优延迟 τ\***：在 \(0..48\) 的滞后窗口里寻找使相关系数最大的延迟
+- **REST + SQLite 缓存**：K 线历史数据落 SQLite，后续运行增量更新，减少 API 调用
+- **BTC LRU 内存缓存**：按 `(timeframe, period)` 缓存 BTC 数据（默认最多 **100** 项），带线程锁保护
+- **飞书告警（可选）**：配置 `LARKBOT_ID` 后发送；否则写入 `alerts/` 目录做兜底
 
-**技术架构**：采用 REST API + SQLite 缓存的混合架构，提供高效的数据获取和分析能力。WebSocket 客户端已实现但当前未在分析器中使用。
+## 文件结构
 
-**要求**: Python >= 3.12
+```
+related_corrcoef_abnormal_websocket_alert/
+├── __init__.py          # 对外导出：SQLiteCache/RESTClient/WebSocketClient/DataManager/DelayCorrelationAnalyzer
+├── pyproject.toml       # 项目配置与依赖（uv）
+├── uv.lock              # 依赖锁定
+├── sqlite_cache.py      # SQLite 缓存
+├── rest_client.py       # 基于 ccxt 的 REST 获取 + 增量更新
+├── websocket_client.py  # hyperliquid-python-sdk WebSocket 订阅（当前分析流程未使用）
+├── manager.py           # DataManager：统一数据访问 + BTC LRU 缓存
+├── analyzer.py          # DelayCorrelationAnalyzer：异常检测 + 告警
+├── main.py              # 命令行入口（analysis/monitor）
+└── utils/
+    ├── config.py        # ENV/LARKBOT_ID/REDIS_* 环境变量
+    ├── lark_bot.py      # 飞书消息发送
+    ├── redisdb.py       # Redis 连接池（可选）
+    ├── scheduler.py     # 定时调度装饰器（与主分析器运行无强依赖）
+    └── spider_failed_alert.py # 爬虫失败告警装饰器（与主分析器运行无强依赖）
+```
 
-## 目录
+## 快速开始
 
-- [概述](#概述)
-- [核心特性](#核心特性)
-- [文件结构](#文件结构)
-- [快速开始](#快速开始)
-  - [安装依赖](#安装依赖)
-  - [运行分析](#运行分析)
-  - [命令行参数](#命令行参数)
-- [模块说明](#模块说明)
-  - [SQLiteCache](#sqlitecache-sqlite_cachepy)
-  - [RESTClient](#restclient-rest_clientpy)
-  - [WebSocketClient](#websocketclient-websocket_clientpy)
-  - [DataManager](#datamanager-managerpy)
-  - [DelayCorrelationAnalyzer](#delaycorrelationanalyzer-analyzerpy)
-  - [Utils 工具模块](#utils-工具模块)
-- [数据获取策略](#数据获取策略)
-- [性能优化](#性能优化)
-- [注意事项](#注意事项)
-  - [异常检测阈值](#异常检测阈值)
-  - [日志文件](#日志文件)
-  - [线程安全](#线程安全)
-  - [环境变量配置](#环境变量配置)
-  - [数据要求](#数据要求)
-- [故障排查](#故障排查)
-- [依赖](#依赖)
-- [许可证](#许可证)
+### 安装依赖（uv）
+
+```bash
+uv sync
+```
+
+### 运行（重要：运行方式与包结构有关）
+
+本仓库根目录本身是一个 Python package（使用了**相对导入**），因此推荐两种运行方式：
+
+**方式 A：在仓库父目录运行（推荐）**
+
+```bash
+cd ..
+python -m related_corrcoef_abnormal_websocket_alert.main --mode=analysis
+```
+
+**方式 B：在仓库目录内运行（设置 PYTHONPATH 指向父目录）**
+
+```bash
+PYTHONPATH="$(pwd)/.." python -m related_corrcoef_abnormal_websocket_alert.main --mode=analysis
+```
+
+### 常用命令示例
+
+```bash
+# 一次性分析所有币种（默认）
+python -m related_corrcoef_abnormal_websocket_alert.main --mode=analysis
+
+# 分析单个币种（快速验证）
+python -m related_corrcoef_abnormal_websocket_alert.main --coin=ETH/USDC:USDC
+
+# 监控模式：按间隔循环分析
+python -m related_corrcoef_abnormal_websocket_alert.main --mode=monitor --interval=3600
+
+# 自定义时间周期与数据周期
+python -m related_corrcoef_abnormal_websocket_alert.main --timeframes=1m,5m --periods=1d,7d,30d,60d
+
+# 调试日志
+python -m related_corrcoef_abnormal_websocket_alert.main --debug
+
+# 指定数据库路径
+python -m related_corrcoef_abnormal_websocket_alert.main --db=hyperliquid_data.db
+```
+
+### 命令行参数（`main.py`）
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--mode` | `analysis` 一次性分析 / `monitor` 持续监控 | `analysis` |
+| `--coin` | 指定单个交易对，如 `ETH/USDC:USDC` | - |
+| `--exchange` | 交易所名称（ccxt） | `hyperliquid` |
+| `--db` | SQLite 数据库路径 | `hyperliquid_data.db` |
+| `--timeframes` | K 线周期（逗号分隔） | `1m,5m` |
+| `--periods` | 数据周期（逗号分隔） | `1d,7d,30d,60d` |
+| `--interval` | 监控模式分析间隔（秒） | `3600` |
+| `--debug` | 启用 DEBUG 日志 | - |
+
+## 告警与输出
+
+- **日志文件**：默认写入 `analyzer.log`（10MB 轮转，保留 5 个备份），同时输出到控制台（见 `analyzer.py: setup_logging()`）。
+- **飞书告警**：设置 `LARKBOT_ID` 后启用（见 `analyzer.py`）。
+- **告警落盘兜底**：若飞书未配置/发送失败，会在 `alerts/` 下写入：
+  - `alerts/alert_{safe_coin}_{timestamp}.txt`
+
+## 环境变量
+
+```bash
+# 环境标识（可选，scheduler 在 local 环境会“直接执行”而不等待调度）
+export ENV=production
+
+# 飞书机器人 Webhook ID（用于 analyzer 异常告警）
+export LARKBOT_ID=your_bot_id
+
+# Redis（可选：给 spider_failed_alert 做 24h 去重；未配置会自动降级）
+export REDIS_HOST=127.0.0.1
+export REDIS_PASSWORD=your_redis_password
+
+# 爬虫失败告警（可选：spider_failed_alert 使用）
+export SPIDER_ALERT_WEBHOOK_ID=your_webhook_id
+```
+
+## 异常检测逻辑（以代码为准）
+
+位于 `analyzer.py: DelayCorrelationAnalyzer`：
+
+- **最小数据点**
+  - 相关系数计算最小点数：`MIN_POINTS_FOR_CORR_CALC = 30`
+  - 单次分析最小点数：`MIN_DATA_POINTS_FOR_ANALYSIS = 100`
+- **阈值**
+  - 长期相关阈值：`LONG_TERM_CORR_THRESHOLD = 0.6`
+  - 短期相关阈值：`SHORT_TERM_CORR_THRESHOLD = 0.3`
+  - 差值阈值：`CORR_DIFF_THRESHOLD = 0.5`
+- **判定规则（默认周期集合）**
+  - 短期周期：`['1d']`
+  - 长期周期：`['7d', '30d', '60d']`
+  - 当长期最大相关 > 阈值 且 短期最小相关 < 阈值 时：
+    - 若差值（长期最大 - 短期最小）> 差值阈值，则异常
+    - 或者短期（`1d`）存在明显滞后（`tau_star > 0`）也会触发
+
+## 模块使用（代码调用）
+
+```python
+from related_corrcoef_abnormal_websocket_alert import DataManager, DelayCorrelationAnalyzer
+
+manager = DataManager(db_path="hyperliquid_data.db")
+df = manager.get_ohlcv("BTC/USDC:USDC", "5m", "7d")
+
+analyzer = DelayCorrelationAnalyzer(db_path="hyperliquid_data.db")
+analyzer.run_single("ETH/USDC:USDC")
+```
+
+## 常见问题（Troubleshooting）
+
+- **429 / RateLimitExceeded**：已启用 ccxt `enableRateLimit`（默认 `rateLimit=500ms`），如仍频繁触发可在 `RESTClient(rate_limit_ms=1000)` 增大间隔。
+- **飞书未发送**：未设置 `LARKBOT_ID` 时会提示并落盘到 `alerts/`。
+- **SQLite 锁**：`SQLiteCache` 使用线程本地连接 + `timeout=60s`，单进程多线程一般可用；多进程并发建议分库或外置存储。
+
+## 依赖
+
+依赖以 `pyproject.toml` 为准：
+
+- `ccxt`
+- `hyperliquid-python-sdk`
+- `numpy`
+- `pandas`
+- `retry`
+- `requests`
+- `redis`（可选路径会自动降级）
+- `matplotlib` / `seaborn` / `pyinform`（当前分析主流程不强依赖绘图，但在依赖中保留）
+
+## 许可证
+
+MIT License
 
 ## 核心特性
 

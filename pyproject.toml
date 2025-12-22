@@ -1,5 +1,5 @@
 [project]
-name = "calculate-fake-te"
+name = "delay-correlation-analyzer"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"

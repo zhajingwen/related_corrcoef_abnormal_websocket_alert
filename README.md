@@ -1,9 +1,9 @@
-# Hyperliquid 相关系数异常监控与告警 (DVA)
+# Hyperliquid 相关系数异常监控与告警
 
 ![Python Version](https://img.shields.io/badge/python-3.12%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-本项目（**DVA: Delay Correlation Analyzer**）专注于分析 **Hyperliquid** 交易所中山寨币与 **BTC/USDC:USDC** 的皮尔逊相关性。其核心目标是识别“**短期低相关但长期高相关**”且可能存在**时间差（滞后关系）**的异常币种，通过**飞书机器人**实时推送告警，帮助发现潜在的滞后套利或补涨机会。
+本项目（**Delay Correlation Analyzer**）专注于分析 **Hyperliquid** 交易所中山寨币与 **BTC/USDC:USDC** 的皮尔逊相关性。其核心目标是识别“**短期低相关但长期高相关**”且可能存在**时间差（滞后关系）**的异常币种，通过**飞书机器人**实时推送告警，帮助发现潜在的滞后套利或补涨机会。
 
 ---
 

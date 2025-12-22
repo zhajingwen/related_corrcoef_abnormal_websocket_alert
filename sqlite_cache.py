@@ -85,24 +85,35 @@ class SQLiteCache:
     def _get_connection(self):
         """
         获取数据库连接（上下文管理器，线程安全）
-        
+
         每个线程使用独立的连接，避免多线程并发问题。
+        使用双重检查锁定模式防止连接泄漏。
         """
-        # 检查当前线程是否已有连接
-        if not hasattr(self._local, 'conn') or self._local.conn is None:
-            conn = sqlite3.connect(
-                self.db_path,
-                check_same_thread=False,
-                timeout=60.0  # 增加超时时间到60秒，避免并发时锁等待超时
-            )
-            self._local.conn = conn
-            # 跟踪连接以便后续关闭
+        # 快速路径：无锁检查（避免不必要的锁竞争）
+        if hasattr(self._local, 'conn') and self._local.conn is not None:
+            conn_to_use = self._local.conn
+        else:
+            # 慢速路径：需要创建新连接，使用锁保护
             with self._connections_lock:
-                # 检查连接是否已经在列表中（避免重复添加）
-                if conn not in self._connections:
+                # 双重检查：可能在等待锁期间其他线程已创建
+                if not hasattr(self._local, 'conn') or self._local.conn is None:
+                    conn = sqlite3.connect(
+                        self.db_path,
+                        check_same_thread=False,
+                        timeout=10.0  # 降低超时到10秒，配合WAL模式
+                    )
+                    # 启用WAL模式提升并发性能（允许读写并行）
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    # 平衡安全性和性能
+                    conn.execute("PRAGMA synchronous=NORMAL")
+                    # 设置32MB缓存提升性能
+                    conn.execute("PRAGMA cache_size=-32000")
+
+                    self._local.conn = conn
                     self._connections.append(conn)
-        
-        conn_to_use = self._local.conn
+                    logger.debug(f"创建新数据库连接 | 线程ID: {threading.get_ident()}")
+
+                conn_to_use = self._local.conn
         try:
             yield conn_to_use
         except sqlite3.Error as e:

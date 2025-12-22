@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "projectName": "delay-correlation-analyzer",
+  "prdPath": ".taskmaster/docs/prd.txt",
+  "templatesPath": ".taskmaster/templates",
+  "tasksPath": ".taskmaster/tasks"
+}
+

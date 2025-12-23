@@ -38,3 +38,4 @@ alerts/
 .env.local
 .env.*.local
 CLAUDE.md
+*TEST*.md

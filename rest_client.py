@@ -159,13 +159,14 @@ class RESTClient:
             if cached_df is not None and len(cached_df) >= target_bars * 0.95:  # 降低阈值到95%
                 # 验证时间范围覆盖
                 time_span_required = target_bars * ms_per_bar
-                actual_time_span = cached_df.index[-1] - cached_df.index[0]
+                # 将Timedelta转换为毫秒以便与int比较
+                actual_time_span_ms = (cached_df.index[-1] - cached_df.index[0]).total_seconds() * 1000
 
-                if actual_time_span >= time_span_required * 0.95:
+                if actual_time_span_ms >= time_span_required * 0.95:
                     logger.debug(f"缓存数据充足 {len(cached_df)}/{target_bars}")
                     return self._process_dataframe(cached_df)
                 else:
-                    logger.debug(f"缓存数据时间跨度不足 {actual_time_span}/{time_span_required}ms")
+                    logger.debug(f"缓存数据时间跨度不足 {actual_time_span_ms:.0f}/{time_span_required}ms")
         
         # 全量下载
         logger.debug(f"全量下载 | {symbol} | {timeframe} | {period}")
@@ -226,7 +227,8 @@ class RESTClient:
             new_df = self._download_range(symbol, timeframe, new_since, now_ms)
             if not new_df.empty:
                 # 去除重复的边界数据
-                new_df = new_df[new_df.index > latest_cached]
+                # 将int时间戳转换为Timestamp以便与DatetimeIndex比较
+                new_df = new_df[new_df.index > pd.to_datetime(latest_cached, unit='ms')]
                 if not new_df.empty:
                     self.cache.save_ohlcv(symbol, timeframe, new_df)
         

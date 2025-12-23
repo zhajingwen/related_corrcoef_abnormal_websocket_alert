@@ -6,7 +6,8 @@
       "Bash(python:*)",
       "Bash(uv run python:*)",
       "Bash(uv sync:*)",
-      "Bash(uv pip list:*)"
+      "Bash(uv pip list:*)",
+      "Bash(chmod:*)"
     ]
   }
 }

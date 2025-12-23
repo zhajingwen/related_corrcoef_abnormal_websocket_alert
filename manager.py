@@ -117,15 +117,21 @@ class DataManager:
     def get_btc_data(self, timeframe: str, period: str) -> Optional[pd.DataFrame]:
         """
         获取 BTC 数据（带 LRU 内存缓存，线程安全）
-        
+
         使用下载锁模式，确保同一数据只下载一次，避免多线程环境下的重复下载。
-        
+
         Args:
             timeframe: K 线周期
             period: 数据周期
-        
+
         Returns:
-            BTC 的 OHLCV 数据
+            BTC 的 OHLCV 数据（深复制，调用者可安全修改）
+
+        Note:
+            修复BUG#13：返回深复制以避免修改缓存
+            - 深复制确保线程安全和数据隔离
+            - 如果频繁调用影响性能，可考虑使用浅复制
+            - 当前实现优先保证正确性，性能影响可接受
         """
         cache_key = (timeframe, period)
         
@@ -138,6 +144,7 @@ class DataManager:
                 # 移到末尾（标记为最近使用）
                 self._btc_cache.move_to_end(cache_key)
                 logger.debug(f"BTC 数据缓存命中 | {timeframe}/{period}")
+                # BUG#13: 深复制确保线程安全
                 return self._btc_cache[cache_key].copy(deep=True)
         
         # 缓存未命中，获取该键的下载锁
@@ -150,6 +157,7 @@ class DataManager:
                     # 其他线程已经下载了，直接返回缓存的数据
                     self._btc_cache.move_to_end(cache_key)
                     logger.debug(f"BTC 数据已被其他线程缓存 | {timeframe}/{period}")
+                    # BUG#13: 深复制确保线程安全
                     return self._btc_cache[cache_key].copy(deep=True)
                 else:
                     # 记录缓存未命中
@@ -174,6 +182,7 @@ class DataManager:
                                 # 缓存已被其他线程清空，安全退出
                                 break
 
+                    # BUG#13: 深复制确保线程安全
                     return df.copy(deep=True)
             except Exception as e:
                 logger.error(f"获取 BTC 数据失败 | {timeframe}/{period} | {e}")

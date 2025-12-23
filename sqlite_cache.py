@@ -97,9 +97,11 @@ class SQLiteCache:
             with self._connections_lock:
                 # 双重检查：可能在等待锁期间其他线程已创建
                 if not hasattr(self._local, 'conn') or self._local.conn is None:
+                    # 修复BUG#3：移除check_same_thread=False（Fail Fast原则）
+                    # threading.local()已确保每线程独立连接，保留默认check_same_thread=True
+                    # 可以在误用时立即报错，而非静默失败
                     conn = sqlite3.connect(
                         self.db_path,
-                        check_same_thread=False,
                         timeout=10.0  # 降低超时到10秒，配合WAL模式
                     )
                     # 启用WAL模式提升并发性能（允许读写并行）

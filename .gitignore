@@ -8,7 +8,6 @@ env/
 venv/
 ENV/
 .venv
-*.db
 *.sqlite
 *.sqlite3
 
@@ -54,6 +53,4 @@ CLAUDE.md
 *test*.sh.log
 *test*.sh.log.gz
 *test*.sh.log.gz.tar
-hyperliquid_data.db-shm
-hyperliquid_data.db-wal
 *.pyc

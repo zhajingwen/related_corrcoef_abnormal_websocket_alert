@@ -15,12 +15,12 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from .manager import DataManager, BTC_SYMBOL
+from manager import DataManager, BTC_SYMBOL
 
 # 尝试导入飞书通知（可选）
 try:
-    from .utils.lark_bot import sender
-    from .utils.config import lark_bot_id
+    from utils.lark_bot import sender
+    from utils.config import lark_bot_id
     HAS_LARK_BOT = True
 except ImportError:
     HAS_LARK_BOT = False
@@ -129,6 +129,7 @@ class DelayCorrelationAnalyzer:
         
         # 初始化锁（防止多线程环境下的竞态条件）
         self._init_lock = threading.Lock()
+        self._is_initialized = False  # 初始化标志，避免重复预取数据
 
         logger.info(
             f"分析器初始化 | 交易所: {exchange_name} | "
@@ -136,13 +137,20 @@ class DelayCorrelationAnalyzer:
         )
 
     def initialize(self):
-        """初始化：启动数据管理器（线程安全）"""
+        """初始化：启动数据管理器（线程安全，只在首次调用时预取数据）"""
         with self._init_lock:
+            if self._is_initialized:
+                logger.debug("分析器已初始化，跳过重复初始化")
+                return
+
             self.data_manager.initialize()
 
-            # 预取 BTC 数据
+            # 预取 BTC 数据（只在首次初始化时执行）
             logger.info("预取 BTC 历史数据...")
             self.data_manager.prefetch_btc_data(self.timeframes, self.periods)
+
+            self._is_initialized = True
+            logger.info("分析器初始化完成")
     
     def shutdown(self):
         """关闭：停止数据管理器"""
@@ -152,15 +160,15 @@ class DelayCorrelationAnalyzer:
     def find_optimal_delay(btc_ret: np.ndarray, alt_ret: np.ndarray, max_lag: int = 48) -> tuple:
         """
         寻找最优延迟 τ*
-        
+
         通过计算不同延迟下 BTC 和山寨币收益率的相关系数，找出使相关系数最大的延迟值。
         tau_star > 0 表示山寨币滞后于 BTC，存在时间差套利机会。
-        
+
         Args:
-            btc_ret: BTC 收益率数组
-            alt_ret: 山寨币收益率数组
+            btc_ret: BTC 收益率数组（应与alt_ret长度一致）
+            alt_ret: 山寨币收益率数组（应与btc_ret长度一致）
             max_lag: 最大延迟值
-        
+
         Returns:
             (tau_star, corrs, max_corr): 最优延迟、相关系数列表、最大相关系数
         """
@@ -168,19 +176,17 @@ class DelayCorrelationAnalyzer:
         lags = list(range(0, max_lag + 1))
         btc_len = len(btc_ret)
         alt_len = len(alt_ret)
-        
-        # 检查数据长度是否一致，如果不一致则记录警告并使用最小长度
+
+        # 严格检查：数据长度必须一致（应该在调用前已对齐）
         if btc_len != alt_len:
-            logger.warning(
-                f"数据长度不一致: BTC={btc_len}, ALT={alt_len}, "
-                f"将使用最小长度 {min(btc_len, alt_len)} 进行计算"
+            logger.error(
+                f"严重错误：输入数据长度不一致 | BTC={btc_len}, ALT={alt_len} | "
+                f"这表明数据对齐逻辑存在问题，返回NaN避免错误计算"
             )
-            min_len = min(btc_len, alt_len)
-            btc_ret = btc_ret[:min_len]
-            alt_ret = alt_ret[:min_len]
-            arr_len = min_len
-        else:
-            arr_len = btc_len
+            # 返回无效结果，不进行不准确的计算
+            return 0, [np.nan] * (max_lag + 1), np.nan
+
+        arr_len = btc_len
         
         for lag in lags:
             # 检查 lag 是否会导致数据不足
@@ -254,21 +260,48 @@ class DelayCorrelationAnalyzer:
     ) -> Optional[tuple[pd.DataFrame, pd.DataFrame]]:
         """
         对齐和验证 BTC 与山寨币数据
-        
+
         Args:
             btc_df: BTC 数据 DataFrame
             alt_df: 山寨币数据 DataFrame
             coin: 币种名称（用于日志）
             timeframe: 时间周期
             period: 数据周期
-        
+
         Returns:
             成功返回对齐后的 (btc_df, alt_df)，失败返回 None
         """
+        # 记录原始数据量
+        original_btc_len = len(btc_df)
+        original_alt_len = len(alt_df)
+
         # 对齐时间索引
         common_idx = btc_df.index.intersection(alt_df.index)
         btc_df_aligned = btc_df.loc[common_idx].copy()
         alt_df_aligned = alt_df.loc[common_idx].copy()
+
+        # 计算对齐损失率
+        aligned_len = len(btc_df_aligned)
+        if aligned_len == 0:
+            logger.warning(
+                f"时间对齐后无共同数据点 | 币种: {coin} | {timeframe}/{period} | "
+                f"BTC原始={original_btc_len}, ALT原始={original_alt_len}"
+            )
+            return None
+
+        loss_ratio = 1 - (aligned_len / min(original_btc_len, original_alt_len))
+        if loss_ratio > 0.1:  # 损失超过10%发出警告
+            logger.warning(
+                f"时间对齐损失超过10% | 币种: {coin} | {timeframe}/{period} | "
+                f"BTC: {original_btc_len}→{aligned_len} | "
+                f"ALT: {original_alt_len}→{aligned_len} | "
+                f"损失率: {loss_ratio:.1%}"
+            )
+        else:
+            logger.debug(
+                f"数据对齐完成 | 币种: {coin} | {timeframe}/{period} | "
+                f"共同点: {aligned_len}/{min(original_btc_len, original_alt_len)}"
+            )
         
         # 数据验证：检查数据量
         if len(btc_df_aligned) < self.MIN_DATA_POINTS_FOR_ANALYSIS:

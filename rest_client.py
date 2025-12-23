@@ -12,7 +12,7 @@ import ccxt
 import pandas as pd
 from retry import retry
 
-from .sqlite_cache import SQLiteCache
+from sqlite_cache import SQLiteCache
 
 logger = logging.getLogger(__name__)
 
@@ -225,43 +225,70 @@ class RESTClient:
         since_ms: int,
         target_bars: int
     ) -> pd.DataFrame:
-        """全量下载 OHLCV 数据"""
+        """全量下载 OHLCV 数据（改进版：支持重试和部分数据返回）"""
         all_rows = []
         fetched = 0
         current_since = since_ms
         request_count = 0
         last_timestamp = None
-        
+        consecutive_failures = 0  # 连续失败计数
+        MAX_CONSECUTIVE_FAILURES = 3  # 最大连续失败次数
+
         while True:
             # 安全阀：限制最大请求次数
             request_count += 1
             if request_count > self.MAX_REQUESTS_PER_DOWNLOAD:
-                logger.warning(f"达到最大请求次数限制 ({self.MAX_REQUESTS_PER_DOWNLOAD}) | {symbol} | {timeframe}")
+                logger.warning(
+                    f"达到最大请求次数限制 ({self.MAX_REQUESTS_PER_DOWNLOAD}) | "
+                    f"{symbol} | {timeframe} | 已获取 {len(all_rows)} 条数据"
+                )
                 break
-            
+
             try:
                 ohlcv = self._fetch_ohlcv_raw(symbol, timeframe, current_since, limit=1500)
+                consecutive_failures = 0  # 成功则重置连续失败计数
+
             except Exception as e:
-                logger.error(f"下载失败 | {symbol} | {timeframe} | {e}")
-                break
-            
+                consecutive_failures += 1
+                logger.error(
+                    f"下载失败 ({consecutive_failures}/{MAX_CONSECUTIVE_FAILURES}) | "
+                    f"{symbol} | {timeframe} | {e}"
+                )
+
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    logger.error(
+                        f"连续失败{MAX_CONSECUTIVE_FAILURES}次，中止下载 | "
+                        f"{symbol} | {timeframe} | 已获取 {len(all_rows)} 条数据"
+                    )
+                    break
+
+                # 指数退避：等待后重试
+                backoff_seconds = 2 ** consecutive_failures  # 2, 4, 8秒
+                logger.info(f"等待 {backoff_seconds} 秒后重试...")
+                time.sleep(backoff_seconds)
+                continue
+
             if not ohlcv:
+                logger.debug(f"无更多数据 | {symbol} | {timeframe}")
                 break
-            
+
             # 安全阀：检测时间戳不前进（API 返回相同数据）
             new_timestamp = ohlcv[-1][0]
             if last_timestamp is not None and new_timestamp <= last_timestamp:
-                logger.warning(f"检测到时间戳未前进，终止下载 | {symbol} | {timeframe} | timestamp={new_timestamp}")
+                logger.warning(
+                    f"检测到时间戳未前进，终止下载 | "
+                    f"{symbol} | {timeframe} | timestamp={new_timestamp}"
+                )
                 break
             last_timestamp = new_timestamp
-            
+
             all_rows.extend(ohlcv)
             fetched += len(ohlcv)
             current_since = new_timestamp + 1
-            
+
             if len(ohlcv) < 1500 or fetched >= target_bars:
                 break
-            
+
             # 请求间隔
             time.sleep(self.rate_limit_ms / 1000)
         
@@ -277,24 +304,47 @@ class RESTClient:
         since_ms: int,
         until_ms: int
     ) -> pd.DataFrame:
-        """下载指定时间范围的 OHLCV 数据"""
+        """下载指定时间范围的 OHLCV 数据（改进版：支持重试）"""
         all_rows = []
         current_since = since_ms
         request_count = 0
         last_timestamp = None
-        
+        consecutive_failures = 0  # 连续失败计数
+        MAX_CONSECUTIVE_FAILURES = 3  # 最大连续失败次数
+
         while current_since < until_ms:
             # 安全阀：限制最大请求次数
             request_count += 1
             if request_count > self.MAX_REQUESTS_PER_DOWNLOAD:
-                logger.warning(f"达到最大请求次数限制 ({self.MAX_REQUESTS_PER_DOWNLOAD}) | {symbol} | {timeframe}")
+                logger.warning(
+                    f"达到最大请求次数限制 ({self.MAX_REQUESTS_PER_DOWNLOAD}) | "
+                    f"{symbol} | {timeframe} | 已获取 {len(all_rows)} 条数据"
+                )
                 break
-            
+
             try:
                 ohlcv = self._fetch_ohlcv_raw(symbol, timeframe, current_since, limit=1500)
+                consecutive_failures = 0  # 成功则重置连续失败计数
+
             except Exception as e:
-                logger.error(f"下载范围失败 | {symbol} | {timeframe} | {e}")
-                break
+                consecutive_failures += 1
+                logger.error(
+                    f"下载范围失败 ({consecutive_failures}/{MAX_CONSECUTIVE_FAILURES}) | "
+                    f"{symbol} | {timeframe} | {e}"
+                )
+
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    logger.error(
+                        f"连续失败{MAX_CONSECUTIVE_FAILURES}次，中止范围下载 | "
+                        f"{symbol} | {timeframe} | 已获取 {len(all_rows)} 条数据"
+                    )
+                    break
+
+                # 指数退避：等待后重试
+                backoff_seconds = 2 ** consecutive_failures  # 2, 4, 8秒
+                logger.info(f"等待 {backoff_seconds} 秒后重试...")
+                time.sleep(backoff_seconds)
+                continue
             
             # 安全阀：检查列表是否为空或长度为0
             # 在访问 ohlcv[-1] 之前进行检查，确保安全

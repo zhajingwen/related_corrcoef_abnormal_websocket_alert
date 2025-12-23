@@ -2,7 +2,7 @@ import redis
 import logging
 import threading
 import time
-from .config import redis_password, redis_host
+from utils.config import redis_password, redis_host
 from typing import Optional
 
 logger = logging.getLogger(__name__)

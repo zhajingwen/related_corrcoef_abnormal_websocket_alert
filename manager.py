@@ -9,10 +9,11 @@ import logging
 import threading
 from collections import OrderedDict
 from typing import Optional
+from time import time
 import pandas as pd
 
-from .sqlite_cache import SQLiteCache
-from .rest_client import RESTClient
+from sqlite_cache import SQLiteCache
+from rest_client import RESTClient
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,8 @@ class DataManager:
     MAX_BTC_CACHE_SIZE = 100
     # 下载锁最大数量（防止内存泄漏）
     MAX_DOWNLOAD_LOCKS = 200
+    # 下载锁过期时间（秒）- 5分钟无活动则认为过期
+    LOCK_EXPIRE_SECONDS = 300
     
     def __init__(
         self,
@@ -58,10 +61,11 @@ class DataManager:
         # BTC 数据缓存（使用 OrderedDict 实现 LRU 缓存，避免内存无限增长）
         self._btc_cache: OrderedDict[tuple[str, str], pd.DataFrame] = OrderedDict()
         self._btc_cache_lock = threading.Lock()  # 保护 BTC 缓存的线程锁
-        
+
         # 下载锁：防止同一数据被多个线程重复下载
-        # 使用字典为每个缓存键维护独立的锁
-        self._download_locks: dict[tuple[str, str], threading.Lock] = {}
+        # 使用字典为每个缓存键维护独立的锁，并记录最后访问时间
+        # 格式：{cache_key: (lock, last_access_timestamp)}
+        self._download_locks: dict[tuple[str, str], tuple[threading.Lock, float]] = {}
         self._download_locks_lock = threading.Lock()  # 保护 _download_locks 的元锁
         
         # 缓存命中率统计
@@ -95,7 +99,7 @@ class DataManager:
     
     def _get_download_lock(self, cache_key: tuple[str, str]) -> threading.Lock:
         """
-        获取或创建指定缓存键的下载锁
+        获取或创建指定缓存键的下载锁（基于时间的过期策略）
 
         Args:
             cache_key: 缓存键 (timeframe, period)
@@ -104,23 +108,42 @@ class DataManager:
             该缓存键对应的下载锁
         """
         with self._download_locks_lock:
-            if cache_key not in self._download_locks:
-                # 清理过期的锁（防止内存泄漏）
-                if len(self._download_locks) >= self.MAX_DOWNLOAD_LOCKS:
-                    # 移除一半的旧锁（只移除未被持有的锁）
-                    keys_to_remove = []
-                    for key, lock in list(self._download_locks.items()):
-                        if not lock.locked():
-                            keys_to_remove.append(key)
-                            if len(keys_to_remove) >= self.MAX_DOWNLOAD_LOCKS // 2:
-                                break
-                    for key in keys_to_remove:
-                        del self._download_locks[key]
-                    if keys_to_remove:
-                        logger.debug(f"清理了 {len(keys_to_remove)} 个过期的下载锁")
+            now = time()
 
-                self._download_locks[cache_key] = threading.Lock()
-            return self._download_locks[cache_key]
+            # 如果缓存键已存在，更新时间戳并返回锁
+            if cache_key in self._download_locks:
+                lock, _ = self._download_locks[cache_key]
+                self._download_locks[cache_key] = (lock, now)  # 更新最后访问时间
+                return lock
+
+            # 清理过期的锁（防止内存泄漏）
+            if len(self._download_locks) >= self.MAX_DOWNLOAD_LOCKS:
+                keys_to_remove = [
+                    key for key, (lock, timestamp) in self._download_locks.items()
+                    if now - timestamp > self.LOCK_EXPIRE_SECONDS
+                ]
+
+                # 如果没有过期的锁，强制删除最旧的一半
+                if not keys_to_remove:
+                    # 按时间戳排序，删除最旧的一半
+                    sorted_items = sorted(
+                        self._download_locks.items(),
+                        key=lambda x: x[1][1]  # 按时间戳排序
+                    )
+                    keys_to_remove = [
+                        key for key, _ in sorted_items[:self.MAX_DOWNLOAD_LOCKS // 2]
+                    ]
+
+                for key in keys_to_remove:
+                    del self._download_locks[key]
+
+                if keys_to_remove:
+                    logger.debug(f"清理了 {len(keys_to_remove)} 个下载锁")
+
+            # 创建新锁
+            lock = threading.Lock()
+            self._download_locks[cache_key] = (lock, now)
+            return lock
     
     def get_btc_data(self, timeframe: str, period: str) -> Optional[pd.DataFrame]:
         """

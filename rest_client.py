@@ -151,13 +151,21 @@ class RESTClient:
         now_ms = self.exchange.milliseconds()
         since_ms = now_ms - target_bars * ms_per_bar
         
-        # 检查缓存
+        # 检查缓存（修复BUG#9：增强完整性检查）
         if use_cache and self.cache:
             cached_df = self._get_with_incremental_update(
                 symbol, timeframe, since_ms, now_ms, ms_per_bar, target_bars
             )
-            if cached_df is not None and len(cached_df) >= target_bars * 0.99:  # 允许 1% 的误差
-                return self._process_dataframe(cached_df)
+            if cached_df is not None and len(cached_df) >= target_bars * 0.95:  # 降低阈值到95%
+                # 验证时间范围覆盖
+                time_span_required = target_bars * ms_per_bar
+                actual_time_span = cached_df.index[-1] - cached_df.index[0]
+
+                if actual_time_span >= time_span_required * 0.95:
+                    logger.debug(f"缓存数据充足 {len(cached_df)}/{target_bars}")
+                    return self._process_dataframe(cached_df)
+                else:
+                    logger.debug(f"缓存数据时间跨度不足 {actual_time_span}/{time_span_required}ms")
         
         # 全量下载
         logger.debug(f"全量下载 | {symbol} | {timeframe} | {period}")
@@ -195,8 +203,8 @@ class RESTClient:
         # 检查是否需要下载更早的数据
         if oldest_cached > since_ms:
             # 需要下载更早的历史数据
-            # 使用 oldest_cached 作为边界，确保包含 oldest_cached 本身，避免数据缺失
-            until_ms = oldest_cached
+            # 修复BUG#8：使用oldest_cached-1避免重复下载边界数据
+            until_ms = oldest_cached - 1
             logger.debug(f"下载历史数据 | {symbol} | {timeframe} | "
                         f"从 {since_ms} 到 {until_ms}")
             historical_df = self._download_range(symbol, timeframe, since_ms, until_ms)
@@ -380,9 +388,9 @@ class RESTClient:
                     continue
             all_rows.extend(filtered)
             
-            # 当获取的数据少于限制或时间戳超过边界时停止
-            # 注意：使用 > 而不是 >=，确保当 new_timestamp == until_ms 时已包含边界数据
-            if len(ohlcv) < 1500 or new_timestamp > until_ms:
+            # 当获取的数据少于限制或时间戳到达边界时停止
+            # 修复BUG#7：使用 >= 避免超出范围（当new_timestamp==until_ms时应停止）
+            if len(ohlcv) < 1500 or new_timestamp >= until_ms:
                 break
             
             current_since = new_timestamp + 1

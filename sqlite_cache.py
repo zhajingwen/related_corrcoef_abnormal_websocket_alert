@@ -117,13 +117,19 @@ class SQLiteCache:
         try:
             yield conn_to_use
         except sqlite3.Error as e:
-            # 发生错误时回滚事务
+            # 发生错误时回滚事务（修复BUG#6：添加连接关闭）
             if conn_to_use:
                 try:
                     conn_to_use.rollback()
                 except Exception as rollback_err:
                     # 连接已损坏，先清理连接引用，再从列表移除
                     logger.warning(f"连接回滚失败，重置连接: {rollback_err}")
+                finally:
+                    # 确保关闭连接，避免泄漏
+                    try:
+                        conn_to_use.close()
+                    except Exception:
+                        pass
                     # 关键修复：先将 self._local.conn 设为 None，确保下次访问会创建新连接
                     self._local.conn = None
                     # 从跟踪列表中移除损坏的连接
@@ -132,7 +138,13 @@ class SQLiteCache:
                             self._connections.remove(conn_to_use)
             raise
         except Exception as e:
-            # 捕获其他异常，确保连接状态正确
+            # 捕获其他异常，确保连接状态正确（修复BUG#6：添加连接关闭）
+            if conn_to_use:
+                try:
+                    conn_to_use.close()
+                except Exception:
+                    pass
+                self._local.conn = None
             logger.warning(f"数据库操作异常: {e}")
             raise
     

@@ -206,21 +206,37 @@ class DelayCorrelationAnalyzer:
             else:
                 x = btc_ret
                 y = alt_ret
-            
+
             # 再次检查对齐后的长度（虽然理论上应该一致，但为了安全）
             m = min(len(x), len(y))
-            
+
             # 二次检查：确保对齐后的数据点足够
             if m < DelayCorrelationAnalyzer.MIN_POINTS_FOR_CORR_CALC:
                 corrs.append(np.nan)
                 continue
-            
-            # 抑制常数数组导致的 RuntimeWarning（标准差为 0 时会产生 NaN）
-            with warnings.catch_warnings():
-                warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*invalid value.*')
-                warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*divide by zero.*')
-                corr = np.corrcoef(x[:m], y[:m])[0, 1]
-            corrs.append(np.nan if np.isnan(corr) else corr)
+
+            # 修复BUG#4：使用pandas自动处理NaN
+            x_series = pd.Series(x[:m])
+            y_series = pd.Series(y[:m])
+
+            # 检查有效数据点数量（去除NaN后）
+            valid_mask = ~(x_series.isna() | y_series.isna())
+            valid_count = valid_mask.sum()
+
+            if valid_count < DelayCorrelationAnalyzer.MIN_POINTS_FOR_CORR_CALC:
+                logger.debug(f"有效数据点不足: {valid_count}/{m}")
+                corrs.append(np.nan)
+                continue
+
+            # 计算相关系数（pandas会自动跳过NaN对）
+            correlation = x_series.corr(y_series, method='pearson')
+
+            # 双重检查结果
+            if pd.isna(correlation):
+                logger.debug("相关系数计算结果为NaN")
+                corrs.append(np.nan)
+            else:
+                corrs.append(correlation)
         
         # 找出最大相关系数对应的延迟值
         valid_corrs = np.array(corrs)
@@ -401,8 +417,8 @@ class DelayCorrelationAnalyzer:
         if max_long_corr > self.LONG_TERM_CORR_THRESHOLD and min_short_corr < self.SHORT_TERM_CORR_THRESHOLD:
             if diff_amount > self.CORR_DIFF_THRESHOLD:
                 return True, diff_amount
-            # 短期存在明显滞后时也触发
-            if any(tau_star > 0 for _, _, period, tau_star in results if period == '1d'):
+            # 短期存在明显滞后时也触发（修复BUG#4：增加NaN检查）
+            if any(not np.isnan(tau_star) and tau_star > 0 for _, _, period, tau_star in results if period == '1d'):
                 return True, diff_amount
         
         return False, 0
@@ -482,8 +498,9 @@ class DelayCorrelationAnalyzer:
                 except Exception as e:
                     logger.warning(f"处理失败 | {coin} | {timeframe}/{period} | {e}")
         
-        # 过滤 NaN 并按相关系数降序排序
-        valid_results = [(corr, tf, p, ts) for corr, tf, p, ts in results if not np.isnan(corr)]
+        # 过滤 NaN 并按相关系数降序排序（修复BUG#4：同时检查corr和tau_star）
+        valid_results = [(corr, tf, p, ts) for corr, tf, p, ts in results
+                         if not np.isnan(corr) and not np.isnan(ts)]
         valid_results = sorted(valid_results, key=lambda x: x[0], reverse=True)
         
         if not valid_results:

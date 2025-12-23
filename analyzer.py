@@ -10,6 +10,7 @@ import os
 import logging
 import warnings
 import threading
+import uuid
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 import numpy as np
@@ -206,21 +207,37 @@ class DelayCorrelationAnalyzer:
             else:
                 x = btc_ret
                 y = alt_ret
-            
+
             # 再次检查对齐后的长度（虽然理论上应该一致，但为了安全）
             m = min(len(x), len(y))
-            
+
             # 二次检查：确保对齐后的数据点足够
             if m < DelayCorrelationAnalyzer.MIN_POINTS_FOR_CORR_CALC:
                 corrs.append(np.nan)
                 continue
-            
-            # 抑制常数数组导致的 RuntimeWarning（标准差为 0 时会产生 NaN）
-            with warnings.catch_warnings():
-                warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*invalid value.*')
-                warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*divide by zero.*')
-                corr = np.corrcoef(x[:m], y[:m])[0, 1]
-            corrs.append(np.nan if np.isnan(corr) else corr)
+
+            # 修复BUG#4：使用pandas自动处理NaN
+            x_series = pd.Series(x[:m])
+            y_series = pd.Series(y[:m])
+
+            # 检查有效数据点数量（去除NaN后）
+            valid_mask = ~(x_series.isna() | y_series.isna())
+            valid_count = valid_mask.sum()
+
+            if valid_count < DelayCorrelationAnalyzer.MIN_POINTS_FOR_CORR_CALC:
+                logger.debug(f"有效数据点不足: {valid_count}/{m}")
+                corrs.append(np.nan)
+                continue
+
+            # 计算相关系数（pandas会自动跳过NaN对）
+            correlation = x_series.corr(y_series, method='pearson')
+
+            # 双重检查结果
+            if pd.isna(correlation):
+                logger.debug("相关系数计算结果为NaN")
+                corrs.append(np.nan)
+            else:
+                corrs.append(correlation)
         
         # 找出最大相关系数对应的延迟值
         valid_corrs = np.array(corrs)
@@ -401,8 +418,8 @@ class DelayCorrelationAnalyzer:
         if max_long_corr > self.LONG_TERM_CORR_THRESHOLD and min_short_corr < self.SHORT_TERM_CORR_THRESHOLD:
             if diff_amount > self.CORR_DIFF_THRESHOLD:
                 return True, diff_amount
-            # 短期存在明显滞后时也触发
-            if any(tau_star > 0 for _, _, period, tau_star in results if period == '1d'):
+            # 短期存在明显滞后时也触发（修复BUG#4：增加NaN检查）
+            if any(not np.isnan(tau_star) and tau_star > 0 for _, _, period, tau_star in results if period == '1d'):
                 return True, diff_amount
         
         return False, 0
@@ -437,17 +454,29 @@ class DelayCorrelationAnalyzer:
             logger.warning(f"飞书通知未发送（未配置）| 币种: {coin}")
         
         # 如果告警未成功发送，保存到本地文件作为备份
+        # 修复BUG#10：增强文件告警保存健壮性
         if not alert_sent:
+            alert_dir = "alerts"
             try:
                 # 创建告警目录
-                alert_dir = "alerts"
                 os.makedirs(alert_dir, exist_ok=True)
-                
-                # 生成文件名（包含币种和时间戳）
-                safe_coin = coin.replace('/', '_').replace(':', '_')
-                timestamp = int(time.time())
-                alert_file = os.path.join(alert_dir, f"alert_{safe_coin}_{timestamp}.txt")
-                
+
+                # 检查写权限
+                if not os.access(alert_dir, os.W_OK):
+                    logger.error(f"告警目录无写权限: {alert_dir}")
+                    return
+
+            except Exception as e:
+                logger.error(f"创建告警目录失败: {e}")
+                return
+
+            # 生成唯一文件名（时间戳 + UUID避免冲突）
+            safe_coin = coin.replace('/', '_').replace(':', '_')
+            timestamp = int(time.time())
+            unique_id = uuid.uuid4().hex[:8]
+            alert_file = os.path.join(alert_dir, f"alert_{safe_coin}_{timestamp}_{unique_id}.txt")
+
+            try:
                 # 写入告警内容
                 with open(alert_file, 'w', encoding='utf-8') as f:
                     f.write(f"告警时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -456,8 +485,10 @@ class DelayCorrelationAnalyzer:
                     f.write(f"差值: {diff_amount:.2f}\n\n")
                     f.write("详细分析结果:\n")
                     f.write(df_results.to_string(index=False))
-                
+
                 logger.warning(f"告警已保存到本地文件: {alert_file}")
+            except OSError as e:
+                logger.error(f"保存告警文件失败: {e}")
             except Exception as e:
                 logger.error(f"保存告警到本地文件失败: {e}")
     
@@ -482,8 +513,9 @@ class DelayCorrelationAnalyzer:
                 except Exception as e:
                     logger.warning(f"处理失败 | {coin} | {timeframe}/{period} | {e}")
         
-        # 过滤 NaN 并按相关系数降序排序
-        valid_results = [(corr, tf, p, ts) for corr, tf, p, ts in results if not np.isnan(corr)]
+        # 过滤 NaN 并按相关系数降序排序（修复BUG#4：同时检查corr和tau_star）
+        valid_results = [(corr, tf, p, ts) for corr, tf, p, ts in results
+                         if not np.isnan(corr) and not np.isnan(ts)]
         valid_results = sorted(valid_results, key=lambda x: x[0], reverse=True)
         
         if not valid_results:
@@ -499,16 +531,23 @@ class DelayCorrelationAnalyzer:
             logger.debug(f"常规数据 | 币种: {coin}")
             return False
     
-    def run(self):
-        """分析交易所中所有 USDC 永续合约交易对"""
+    def run(self, stop_event: Optional[threading.Event] = None):
+        """
+        分析交易所中所有 USDC 永续合约交易对
+
+        修复BUG#12：支持优雅关闭
+
+        Args:
+            stop_event: 可选的停止事件，用于优雅关闭
+        """
         logger.info(
             f"启动分析器 | 交易所: {self.exchange_name} | "
             f"时间周期: {self.timeframes} | 数据周期: {self.periods}"
         )
-        
+
         # 初始化
         self.initialize()
-        
+
         try:
             # 获取所有交易对
             usdc_coins = self.data_manager.get_usdc_perpetuals()
@@ -516,15 +555,20 @@ class DelayCorrelationAnalyzer:
             anomaly_count = 0
             skip_count = 0
             start_time = time.time()
-            
+
             logger.info(f"发现 {total} 个 USDC 永续合约交易对")
-            
+
             # 进度里程碑
             milestones = {max(1, int(total * p)) for p in [0.25, 0.5, 0.75, 1.0]}
-            
+
             for idx, coin in enumerate(usdc_coins, 1):
+                # 检查停止信号（修复BUG#12）
+                if stop_event and stop_event.is_set():
+                    logger.info(f"检测到停止信号，已分析 {idx-1}/{total} 个币种")
+                    break
+
                 logger.debug(f"检查币种: {coin}")
-                
+
                 try:
                     result = self.one_coin_analysis(coin)
                     if result:
@@ -532,20 +576,20 @@ class DelayCorrelationAnalyzer:
                 except Exception as e:
                     logger.error(f"分析币种失败 | {coin} | {e}")
                     skip_count += 1
-                
+
                 # 在里程碑位置打印进度
                 if idx in milestones:
                     logger.info(f"分析进度: {idx}/{total} ({idx * 100 // total}%)")
-                
+
                 time.sleep(0.5)  # 降低请求频率
-            
+
             elapsed = time.time() - start_time
             logger.info(
                 f"分析完成 | 交易所: {self.exchange_name} | "
                 f"总数: {total} | 异常: {anomaly_count} | 跳过: {skip_count} | "
                 f"耗时: {elapsed:.1f}s | 平均: {elapsed/max(total, 1):.2f}s/币种"
             )
-        
+
         finally:
             self.shutdown()
     

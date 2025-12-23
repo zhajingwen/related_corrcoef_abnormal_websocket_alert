@@ -139,9 +139,10 @@ def run_monitor(args: argparse.Namespace):
     try:
         while not stop_event.is_set():
             logger.info("开始新一轮分析...")
-            
+
             try:
-                analyzer.run()
+                # 修复BUG#12：传递stop_event支持优雅关闭
+                analyzer.run(stop_event=stop_event)
             except Exception as e:
                 logger.error(f"分析过程出错: {e}")
             
@@ -159,8 +160,16 @@ def run_monitor(args: argparse.Namespace):
     
     except KeyboardInterrupt:
         logger.info("用户中断，正在退出...")
-    
+
     finally:
+        # 修复BUG#12：清理资源
+        logger.info("清理资源...")
+        try:
+            # 关闭数据库连接
+            analyzer.data_manager.cache.close()
+            logger.info("数据库连接已关闭")
+        except Exception as e:
+            logger.error(f"资源清理失败: {e}")
         logger.info("监控模式已停止")
 
 

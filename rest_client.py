@@ -212,13 +212,23 @@ class RESTClient:
                 self.cache.save_ohlcv(symbol, timeframe, historical_df)
         
         # 检查是否需要下载更新的数据
-        if latest_cached <= now_ms - ms_per_bar * 2:  # 允许 2 根 K 线的延迟
-            # 需要下载最新数据
-            new_since = latest_cached + 1
+        # 修复BUG#11：根据timeframe调整容忍度
+        timeframe_tolerance = {
+            '1m': 2, '5m': 2, '15m': 2,
+            '1h': 3, '4h': 3, '1d': 5
+        }
+        tolerance_bars = timeframe_tolerance.get(timeframe, 3)
+
+        if latest_cached <= now_ms - ms_per_bar * tolerance_bars:
+            # 需要下载最新数据（从最后一根K线开始，避免缝隙）
+            new_since = latest_cached
             logger.debug(f"增量更新 | {symbol} | {timeframe} | 从 {latest_cached}")
             new_df = self._download_range(symbol, timeframe, new_since, now_ms)
             if not new_df.empty:
-                self.cache.save_ohlcv(symbol, timeframe, new_df)
+                # 去除重复的边界数据
+                new_df = new_df[new_df.index > latest_cached]
+                if not new_df.empty:
+                    self.cache.save_ohlcv(symbol, timeframe, new_df)
         
         # 从缓存获取完整数据
         return self.cache.get_ohlcv(symbol, timeframe, since_ms=since_ms)

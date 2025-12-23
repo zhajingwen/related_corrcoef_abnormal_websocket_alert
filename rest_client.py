@@ -26,7 +26,7 @@ class RESTClient:
         timeout: int = 30000,
         cache: Optional[SQLiteCache] = None,
         enable_rate_limit: bool = True,
-        rate_limit_ms: int = 500
+        rate_limit_ms: int = 5000
     ):
         """
         初始化 REST 客户端
